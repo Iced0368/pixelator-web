@@ -4,22 +4,24 @@ import { pixelateImageData } from './utils/transform';
 
 import ImageUploadBox from './components/ImageUploadBox.vue';
 import ArrowIcon from './assets/next-arrow.svg'
-import InputAndSlider from './components/common/InputAndSlider.vue';
+import { CanvasWithImageData, InputAndSlider, Tab, TabItem } from './components/common';
 
-const dataURL = ref("");
-const imageSrc = ref("");
+const inputImageData = ref<ImageData>(new ImageData(1, 1));
 
-const imageData = ref<ImageData>(new ImageData(1, 1));
+const outputImageDatas = reactive({
+  output:       ref(new ImageData(1, 1)),
+  edge:         ref(new ImageData(1, 1)),
+  edgeResized:  ref(new ImageData(1, 1)),
+});
 
 const maxSize = reactive({height: 0, width: 0});
 const outputSize = reactive({height: 0, width: 0});
 const preserveRatio = ref(true);
 
-const threshold = ref(0.2);
-
+const threshold = ref(0);
+const sensitivity = ref(50);
 
 const handleUpload = (readerResult: string) => {
-  dataURL.value = readerResult;
   const img = new Image();
 
   img.onload = () => {
@@ -30,16 +32,16 @@ const handleUpload = (readerResult: string) => {
     canvas.height = img.height;
     ctx.drawImage(img, 0, 0);
 
-    imageData.value = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    inputImageData.value = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
     (async function() {
-      maxSize.height = imageData.value.height;
-      maxSize.width = imageData.value.width;
+      maxSize.height = inputImageData.value.height;
+      maxSize.width = inputImageData.value.width;
 
       await nextTick();
 
-      outputSize.height = Math.ceil(imageData.value.height / 2);
-      outputSize.width = Math.ceil(imageData.value.width / 2);
+      outputSize.height = Math.ceil(inputImageData.value.height / 2);
+      outputSize.width = Math.ceil(inputImageData.value.width / 2);
     })();
   }
 
@@ -47,22 +49,17 @@ const handleUpload = (readerResult: string) => {
 }
 
 const handleTransform = () => {
-  
-  const convertedImageData = pixelateImageData(
-    imageData.value, 
+  const pixelated = pixelateImageData(
+    inputImageData.value, 
     outputSize.height, 
     outputSize.width,
     threshold.value,
+    sensitivity.value,
   );
 
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
-
-  canvas.width = convertedImageData.width;
-  canvas.height = convertedImageData.height;
-  ctx.putImageData(convertedImageData, 0, 0);
-  
-  imageSrc.value = canvas.toDataURL();
+  outputImageDatas.output= pixelated.output;
+  outputImageDatas.edge = pixelated.edge;
+  outputImageDatas.edgeResized = pixelated.edgeResized;
 }
 
 const handleHeightChange = (event: Event) => {
@@ -70,7 +67,7 @@ const handleHeightChange = (event: Event) => {
     outputSize.height = Number(event.target.value);
 
     if (preserveRatio.value) {
-      const [height, width] = [imageData.value.height, imageData.value.width];
+      const [height, width] = [inputImageData.value.height, inputImageData.value.width];
       outputSize.width = Math.ceil(outputSize.height * width / height);
     }
   }
@@ -81,7 +78,7 @@ const handleWidthChange = (event: Event) => {
     outputSize.width = Number(event.target.value);
 
     if (preserveRatio.value) {
-      const [height, width] = [imageData.value.height, imageData.value.width];
+      const [height, width] = [inputImageData.value.height, inputImageData.value.width];
       outputSize.height = Math.ceil(outputSize.width * height / width);
     }
   }
@@ -93,18 +90,51 @@ const handleThresholdChange = (event: Event) => {
   }
 }
 
+const handleSensitiviyChange = (event: Event) => {
+  if (event.target && event.target instanceof HTMLInputElement) {
+    sensitivity.value = Number(event.target.value);
+  }
+}
+
 </script>
 
 <template>
   <div class="pixelator-container">
     <div class="transformer-container">
-      <div class="before-container">
-        <ImageUploadBox @uploadFile="handleUpload"/>
-      </div>
+      <Tab>
+        <TabItem tabName="원본 이미지">
+          <div class="before-container">
+            <ImageUploadBox @uploadFile="handleUpload"/>
+          </div>
+        </TabItem>
+      </Tab>
+
       <ArrowIcon></ArrowIcon>
-      <div class="after-container">
-        <img v-if="imageSrc" :src="imageSrc"></img>
-      </div>
+
+      <Tab>
+        <div class="after-container">
+          <TabItem tabName="output">
+            <CanvasWithImageData
+              :imageData="outputImageDatas.output"
+            >
+            </CanvasWithImageData>
+          </TabItem>
+
+          <TabItem tabName="edge">
+            <CanvasWithImageData
+              :imageData="outputImageDatas.edge"
+            >
+            </CanvasWithImageData>
+          </TabItem>
+
+          <TabItem tabName="edge-resized">
+            <CanvasWithImageData
+              :imageData="outputImageDatas.edgeResized"
+            >
+            </CanvasWithImageData>
+          </TabItem>
+        </div>
+      </Tab>
     </div>
 
     <div class="input-container">
@@ -144,6 +174,16 @@ const handleThresholdChange = (event: Event) => {
         >
           임계값
         </InputAndSlider>
+
+        <InputAndSlider 
+          :value="sensitivity"
+          :min="0"
+          :max="100"
+          :step="1"
+          @change="handleSensitiviyChange"
+        >
+          민감도
+        </InputAndSlider>
       </div>
 
     </div>
@@ -173,8 +213,8 @@ const handleThresholdChange = (event: Event) => {
 }
 
 .before-container {
-  width: 300px;
-  height: 300px;
+  width: 400px;
+  height: 400px;
 }
 
 .after-container {
@@ -182,13 +222,14 @@ const handleThresholdChange = (event: Event) => {
   align-items: center;
   justify-content: center;
 
-  width: 300px;
-  height: 300px;
+  width: 400px;
+  height: 400px;
   padding: 10px;
+  margin: 0;
   border: 2px dashed lightgray;
   border-radius: 10px;
 
-  img {
+  canvas {
     width: 100%;
     height: 100%;
     object-fit: contain;
