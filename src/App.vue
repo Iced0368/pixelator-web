@@ -18,8 +18,10 @@ const maxSize = reactive({height: 0, width: 0});
 const outputSize = reactive({height: 0, width: 0});
 const preserveRatio = ref(true);
 
-const threshold = ref(0);
+const threshold = ref(0.2);
 const sensitivity = ref(50);
+
+const expanded = ref(false);
 
 const handleUpload = (readerResult: string) => {
   const img = new Image();
@@ -112,10 +114,11 @@ const handleSensitiviyChange = (event: Event) => {
       <ArrowIcon></ArrowIcon>
 
       <Tab>
-        <div class="after-container">
+        <div :class="['after-container', expanded ? 'expanded' : '']">
           <TabItem tabName="output">
             <CanvasWithImageData
               :imageData="outputImageDatas.output"
+              @click="expanded = !expanded"
             >
             </CanvasWithImageData>
           </TabItem>
@@ -123,6 +126,7 @@ const handleSensitiviyChange = (event: Event) => {
           <TabItem tabName="edge">
             <CanvasWithImageData
               :imageData="outputImageDatas.edge"
+              @click="expanded = !expanded"
             >
             </CanvasWithImageData>
           </TabItem>
@@ -130,6 +134,7 @@ const handleSensitiviyChange = (event: Event) => {
           <TabItem tabName="edge-resized">
             <CanvasWithImageData
               :imageData="outputImageDatas.edgeResized"
+              @click="expanded = !expanded"
             >
             </CanvasWithImageData>
           </TabItem>
@@ -213,8 +218,8 @@ const handleSensitiviyChange = (event: Event) => {
 }
 
 .before-container {
-  width: 400px;
-  height: 400px;
+  width: 300px;
+  height: 300px;
 }
 
 .after-container {
@@ -222,8 +227,8 @@ const handleSensitiviyChange = (event: Event) => {
   align-items: center;
   justify-content: center;
 
-  width: 400px;
-  height: 400px;
+  width: 300px;
+  height: 300px;
   padding: 10px;
   margin: 0;
   border: 2px dashed lightgray;
@@ -237,6 +242,20 @@ const handleSensitiviyChange = (event: Event) => {
 
     margin: 0 auto;
   }
+}
+
+.after-container.expanded {
+  position: fixed;
+  left: 0;
+  top: 0;
+
+  width: 100vw;
+  height: 100vh;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+
+  background-color: black;
 }
 
 .input-container {
