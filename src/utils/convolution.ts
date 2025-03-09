@@ -77,6 +77,6 @@ export function gaussianFilter(input: number[][], size: number, sigma: number) {
             kernel[y][x] /= sum;
         }
     }
-
+    
     return convolution(input, kernel, "same");
 }
