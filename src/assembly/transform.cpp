@@ -1,112 +1,143 @@
 #include <stdint.h>
-#include <stdexcept>
 #include <emscripten.h>
-
-#include "rgba.cpp"
-#include "canny.cpp"
-#include "kmeans.cpp"
-
-RGBA& getDominantColor(
-    RGBA* cell, int cellLength,
-    RGBA* cellEdge, int cellEdgeLength,
-    float closeness, float sensitivity
-) {
-    RGBA median = getMedian<RGBA, int, 4>(cell, cellLength);
-    RGBA complimentary = RGBA(255, 255, 255, 0) - median;
-
-    if (cellEdgeLength) {
-        RGBA edgeColor = getClosest<RGBA, int, 4>(complimentary, cell, cellLength);
-
-        float t = sensitivity == 0 ? 0 : std::pow(closeness, 100 / sensitivity - 1);
-        RGBA target = RGBA(
-            (1 - t)*median[0] + t*edgeColor[0],
-            (1 - t)*median[1] + t*edgeColor[1],
-            (1 - t)*median[2] + t*edgeColor[2],
-            (1 - t)*median[3] + t*edgeColor[3]
-        );
-        return getClosest<RGBA, int, 4>(target, cell, cellLength);
-    }
-    else 
-        return median;
-}
+#include <algorithm>
+#include <iostream>
 
 extern "C" {
-    void pixelateImageData(
-        uint8_t* src, uint8_t* output, uint8_t* edge, uint8_t* edgeness,
-        int height, int width, 
-        int newHeight, int newWidth, 
-        float threshold, float sensitivity
+    void convertGrayToRGBA(uint8_t* src, uint8_t* dst, int length) {
+        for (int i = 0; i < length; i++) {
+            dst[4 * i] = src[i];
+            dst[4 * i + 1] = src[i];
+            dst[4 * i + 2] = src[i];
+            dst[4 * i + 3] = 255;
+        }
+    }
+
+    void medianResize(
+        uint8_t* src, uint8_t* dst,
+        int height, int width,
+        int new_height, int new_width
     ) {
-        RGBA** cellColors = new RGBA*[newHeight * newWidth];
-        RGBA** cellEdgeColors = new RGBA*[newHeight * newWidth];
+        for(int y = 0; y < new_height; y++)
+            for(int x = 0; x < new_width; x++) {
+                int cy_start = y * height / new_height;
+                int cx_start = x * width / new_width;
+                int cy_end = (y + 1) * height / new_height;
+                int cx_end = (x + 1) * width / new_width;
 
-        int* cellSize = new int[newHeight * newWidth];
-        int* cellEdgeSize = new int[newHeight * newWidth];
+                int cell_height = cy_end - cy_start;
+                int cell_width  = cx_end - cx_start;
+                int cell_size = cell_height * cell_width;
+                int idx = y * new_width + x;
 
-        float* canny = getCanny(src, height, width, threshold * 127, threshold * 255);
-        for (int i = 0; i < height * width; i++)
-            edge[i] = (uint8_t)canny[i];
+                uint8_t* rs = new uint8_t[cell_size];
+                uint8_t* gs = new uint8_t[cell_size];
+                uint8_t* bs = new uint8_t[cell_size];
+                uint8_t* as = new uint8_t[cell_size];
 
-        for(int h = 0; h < newHeight; h++)
-            for(int w = 0; w < newWidth; w++) {
-                int i_start = h * height / newHeight;
-                int i_end = (h + 1) * height / newHeight;
-                int j_start = w * width / newWidth;
-                int j_end = (w + 1) * width / newWidth;
-                int cellHeight = i_end - i_start;
-                int cellWidth = j_end - j_start;
-                int cellIndex = h * newWidth + w;
+                int ci = 0;
+                for (int cy = cy_start; cy < cy_end; cy++)
+                    for (int cx = cx_start; cx < cx_end; cx++) {
+                        int src_idx = 4 * (cy * width + cx);
 
-                cellEdgeSize[cellIndex] = 0;
+                        rs[ci] = src[src_idx];
+                        gs[ci] = src[src_idx + 1];
+                        bs[ci] = src[src_idx + 2];
+                        as[ci] = src[src_idx + 3];
+                        ci++;
+                    }
+                
+                std::sort(rs, rs + cell_size);
+                std::sort(gs, gs + cell_size);
+                std::sort(bs, bs + cell_size);
+                std::sort(as, as + cell_size);
 
-                cellColors[cellIndex] = new RGBA[cellHeight * cellWidth];
-                cellEdgeColors[cellIndex] = new RGBA[cellHeight * cellWidth];
-                cellSize[cellIndex] = cellHeight * cellWidth;
+                dst[4*idx] =     rs[cell_size / 2];
+                dst[4*idx + 1] = gs[cell_size / 2];
+                dst[4*idx + 2] = bs[cell_size / 2];
+                dst[4*idx + 3] = as[cell_size / 2];
 
-                int last = 0;
-                for(int i = i_start; i < i_end; i++)
-                    for(int j = j_start; j < j_end; j++) {
-                        int index = 4*(i * width + j);
+                delete[] rs; delete[] gs; delete[] bs; delete[] as;
+            }
+    }
 
-                        RGBA rgba = RGBA(src[index], src[index + 1], src[index + 2], src[index + 3]);
-                        cellColors[cellIndex][last++] = rgba;
+    void emphasizeEdge(
+        uint8_t* src, uint8_t* dst, uint8_t* img,
+        uint8_t* edge, uint8_t* edgeness,
+        int height, int width,
+        int new_height, int new_width,
+        int sensitivity
+    ) {
+        for(int y = 0; y < new_height; y++)
+            for(int x = 0; x < new_width; x++) {
+                int cy_start = y * height / new_height;
+                int cx_start = x * width / new_width;
+                int cy_end = (y + 1) * height / new_height;
+                int cx_end = (x + 1) * width / new_width;
 
-                        if (canny[i * width + j] > 0) {
-                            cellEdgeColors[cellIndex][cellEdgeSize[cellIndex]++] = rgba;
+                int cell_height = cy_end - cy_start;
+                int cell_width  = cx_end - cx_start;
+                int cell_size = cell_height * cell_width;
+                int idx = y * new_width + x;
+
+                int edge_cnt = 0;
+                for (int cy = cy_start; cy < cy_end; cy++)
+                    for (int cx = cx_start; cx < cx_end; cx++)
+                        if (edge[cy * width + cx]) 
+                            edge_cnt++;
+
+                edgeness[idx] = 255 * edge_cnt / cell_size;
+
+                if (!edge_cnt)
+                    continue;
+
+                uint8_t* rs = new uint8_t[cell_size];
+                uint8_t* gs = new uint8_t[cell_size];
+                uint8_t* bs = new uint8_t[cell_size];
+                
+                uint8_t* rs_e = new uint8_t[edge_cnt];
+                uint8_t* gs_e = new uint8_t[edge_cnt];
+                uint8_t* bs_e = new uint8_t[edge_cnt];
+                
+                int ci = 0;
+                int ei = 0;
+                for (int cy = cy_start; cy < cy_end; cy++)
+                    for (int cx = cx_start; cx < cx_end; cx++) {
+                        int src_idx = 4 * (cy * width + cx);
+
+                        rs[ci] = src[src_idx];
+                        gs[ci] = src[src_idx + 1];
+                        bs[ci] = src[src_idx + 2];
+                        ci++;
+
+                        if (edge[cy * width + cx]) {
+                            rs_e[ei] = 255 - src[src_idx];
+                            gs_e[ei] = 255 - src[src_idx + 1];
+                            bs_e[ei] = 255 - src[src_idx + 2];
+                            ei++;
                         }
-                    }   
-                edgeness[cellIndex] = 255 * cellEdgeSize[cellIndex] / (cellHeight * cellWidth);
+                    }
+
+                std::sort(rs_e, rs_e + cell_size);
+                std::sort(gs_e, gs_e + cell_size);
+                std::sort(bs_e, bs_e + cell_size);
+
+                float t = std::powf((float)edge_cnt / cell_size, 100.f / sensitivity - 1);
+
+                uint8_t edge_r = (1.f - t)*img[4*idx]     + t*rs_e[edge_cnt / 2];
+                uint8_t edge_g = (1.f - t)*img[4*idx + 1] + t*gs_e[edge_cnt / 2];
+                uint8_t edge_b = (1.f - t)*img[4*idx + 2] + t*bs_e[edge_cnt / 2];
+
+                int min_dist = 9999;
+                for (int i = 0; i < ci; i++) {
+                    int dist = std::abs((int)rs[i] - edge_r) + std::abs((int)gs[i] - edge_g) + std::abs((int)bs[i] - edge_b);
+                    if (dist < min_dist) {
+                        min_dist = dist;
+                        dst[4*idx]     = rs[i];
+                        dst[4*idx + 1] = gs[i];
+                        dst[4*idx + 2] = bs[i];
+                    }
+                }
             }
-
-        int maxVal = 1;
-        for (int i = 0; i < newHeight * newWidth; i++)
-            if (maxVal < edgeness[i])
-                maxVal = edgeness[i];
-
-        for (int i = 0; i < newHeight * newWidth; i++)
-            edgeness[i] = 255 * edgeness[i] / maxVal;
-
-        for(int h = 0; h < newHeight; h++)
-            for(int w = 0; w < newWidth; w++) {
-                int cellIndex = h * newWidth + w;
-
-                RGBA median = getDominantColor(
-                    cellColors[cellIndex], cellSize[cellIndex],
-                    cellEdgeColors[cellIndex], cellEdgeSize[cellIndex],
-                    (float)edgeness[cellIndex] / 255, sensitivity
-                );
-
-                int index = 4 * (h * newWidth + w);
-                output[index] = median[0];
-                output[index + 1] = median[1];
-                output[index + 2] = median[2];
-                output[index + 3] = median[3];
-            }
-
-        delete[] canny;
-
-        for(int i = 0; i < newHeight * newWidth; i++)
-            delete[] cellColors[i];
-        delete[] cellColors;
     }
 }

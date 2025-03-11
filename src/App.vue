@@ -5,7 +5,8 @@ import { pixelateImageData } from './utils/transform';
 import ImageUploadBox from './components/ImageUploadBox.vue';
 import ArrowIcon from './assets/next-arrow.svg'
 import { CanvasWithImageData, InputAndSlider, Tab, TabItem } from './components/common';
-import { pixelateImageDataWASM } from './utils/wasmAPI';
+import { pixelateImageDataWASM } from './utils/wasm-wrapper';
+
 
 const inputImageData = ref<ImageData>(new ImageData(1, 1));
 
@@ -18,6 +19,7 @@ const outputImageDatas = reactive({
 const maxSize = reactive({height: 0, width: 0});
 const outputSize = reactive({height: 0, width: 0});
 const preserveRatio = ref(true);
+const paletteSize = ref(32);
 
 const threshold = ref(0.2);
 const sensitivity = ref(30);
@@ -51,44 +53,25 @@ const handleUpload = (readerResult: string) => {
 	img.src = readerResult;
 }
 
-const handleTransformWASM = async () => {
-	console.time();
+const handleTransform = () => {
+	console.time("total");
 	try {
-		const res = await pixelateImageDataWASM(
+		const res = pixelateImageData(
 			inputImageData.value,
 			outputSize.height, 
 			outputSize.width,
+			paletteSize.value,
 			threshold.value,
 			sensitivity.value,
 		);
-		
+
 		outputImageDatas.output = res.output;
 		outputImageDatas.edge = res.edge;
 		outputImageDatas.edgeness = res.edgeness;
 	}
 	finally {
-		console.timeEnd();
+		console.timeEnd("total");
 	}
-}
-
-const handleTransform = async () => {
-	console.time();
-	
-	const pixelated = pixelateImageData(
-		inputImageData.value, 
-		outputSize.height, 
-		outputSize.width,
-		threshold.value,
-		sensitivity.value,
-	);
-
-	outputImageDatas.output= pixelated.output;
-	outputImageDatas.edge = pixelated.edge;
-	outputImageDatas.edgeness = pixelated.edgeness;
-	
-
-	console.timeEnd();
-
 }
 
 const handleHeightChange = (event: Event) => {
@@ -110,6 +93,12 @@ const handleWidthChange = (event: Event) => {
 			const [height, width] = [inputImageData.value.height, inputImageData.value.width];
 			outputSize.height = Math.ceil(outputSize.width * height / width);
 		}
+	}
+}
+
+const handlePaletteSizeChange = (event: Event) => {
+	if (event.target && event.target instanceof HTMLInputElement) {
+		paletteSize.value = Number(event.target.value);
 	}
 }
 
@@ -188,6 +177,14 @@ const handleSensitiviyChange = (event: Event) => {
 				>
 					너비(px)
 				</InputAndSlider>
+				<InputAndSlider 
+					:value="paletteSize"
+					:min="0"
+					:max="128"
+					@change="handlePaletteSizeChange"
+				>
+					팔레트 크기 (0일시 색 압축 미사용)
+				</InputAndSlider>
 
 				<div class="checkbox-container">
 					<label for="preserve-ratio">비율 유지</label>
@@ -221,7 +218,6 @@ const handleSensitiviyChange = (event: Event) => {
 			</div>
 		</div>
 		<button @click="handleTransform">픽셀화</button>
-		<button @click="handleTransformWASM">픽셀화-WASM</button>
 	</div>
 </template>
 
