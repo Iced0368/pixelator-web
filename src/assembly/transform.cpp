@@ -1,7 +1,8 @@
 #include <stdint.h>
-#include <emscripten.h>
 #include <algorithm>
 #include <iostream>
+
+#include "kdlabel.cpp"
 
 extern "C" {
     void convertGrayToRGBA(uint8_t* src, uint8_t* dst, int length) {
@@ -30,34 +31,17 @@ extern "C" {
                 int cell_size = cell_height * cell_width;
                 int idx = y * new_width + x;
 
-                uint8_t* rs = new uint8_t[cell_size];
-                uint8_t* gs = new uint8_t[cell_size];
-                uint8_t* bs = new uint8_t[cell_size];
-                uint8_t* as = new uint8_t[cell_size];
+                uint8_t* channel = new uint8_t[cell_size];
+                for (int i = 0; i < 4; i++) {
+                    int ci = 0;
+                    for (int cy = cy_start; cy < cy_end; cy++)
+                        for (int cx = cx_start; cx < cx_end; cx++)
+                            channel[ci++] = src[4 * (cy * width + cx) + i];
 
-                int ci = 0;
-                for (int cy = cy_start; cy < cy_end; cy++)
-                    for (int cx = cx_start; cx < cx_end; cx++) {
-                        int src_idx = 4 * (cy * width + cx);
-
-                        rs[ci] = src[src_idx];
-                        gs[ci] = src[src_idx + 1];
-                        bs[ci] = src[src_idx + 2];
-                        as[ci] = src[src_idx + 3];
-                        ci++;
-                    }
-                
-                std::sort(rs, rs + cell_size);
-                std::sort(gs, gs + cell_size);
-                std::sort(bs, bs + cell_size);
-                std::sort(as, as + cell_size);
-
-                dst[4*idx] =     rs[cell_size / 2];
-                dst[4*idx + 1] = gs[cell_size / 2];
-                dst[4*idx + 2] = bs[cell_size / 2];
-                dst[4*idx + 3] = as[cell_size / 2];
-
-                delete[] rs; delete[] gs; delete[] bs; delete[] as;
+                    std::sort(channel, channel + cell_size);
+                    dst[4*idx + i] = channel[cell_size / 2];
+                }
+                delete[] channel;
             }
     }
 
@@ -80,55 +64,34 @@ extern "C" {
                 int cell_size = cell_height * cell_width;
                 int idx = y * new_width + x;
 
-                int edge_cnt = 0;
-                for (int cy = cy_start; cy < cy_end; cy++)
-                    for (int cx = cx_start; cx < cx_end; cx++)
-                        if (edge[cy * width + cx]) 
-                            edge_cnt++;
-
-                edgeness[idx] = 255 * edge_cnt / cell_size;
-
-                if (!edge_cnt)
-                    continue;
-
                 uint8_t* rs = new uint8_t[cell_size];
                 uint8_t* gs = new uint8_t[cell_size];
                 uint8_t* bs = new uint8_t[cell_size];
-                
-                uint8_t* rs_e = new uint8_t[edge_cnt];
-                uint8_t* gs_e = new uint8_t[edge_cnt];
-                uint8_t* bs_e = new uint8_t[edge_cnt];
-                
+
                 int ci = 0;
-                int ei = 0;
+                int edge_cnt = 0;
                 for (int cy = cy_start; cy < cy_end; cy++)
                     for (int cx = cx_start; cx < cx_end; cx++) {
-                        int src_idx = 4 * (cy * width + cx);
+                        int s_idx = cy * width + cx;
 
-                        rs[ci] = src[src_idx];
-                        gs[ci] = src[src_idx + 1];
-                        bs[ci] = src[src_idx + 2];
+                        if (edge[s_idx]) 
+                            edge_cnt++;
+
+                        rs[ci] = src[4*s_idx];
+                        gs[ci] = src[4*s_idx + 1];
+                        bs[ci] = src[4*s_idx + 2];
                         ci++;
-
-                        if (edge[cy * width + cx]) {
-                            rs_e[ei] = 255 - src[src_idx];
-                            gs_e[ei] = 255 - src[src_idx + 1];
-                            bs_e[ei] = 255 - src[src_idx + 2];
-                            ei++;
-                        }
                     }
 
-                std::sort(rs_e, rs_e + cell_size);
-                std::sort(gs_e, gs_e + cell_size);
-                std::sort(bs_e, bs_e + cell_size);
+                edgeness[idx] = 255 * edge_cnt / cell_size;
 
                 float t = std::powf((float)edge_cnt / cell_size, 100.f / sensitivity - 1);
 
-                uint8_t edge_r = (1.f - t)*img[4*idx]     + t*rs_e[edge_cnt / 2];
-                uint8_t edge_g = (1.f - t)*img[4*idx + 1] + t*gs_e[edge_cnt / 2];
-                uint8_t edge_b = (1.f - t)*img[4*idx + 2] + t*bs_e[edge_cnt / 2];
+                uint8_t edge_r = (1.f - t)*img[4*idx];
+                uint8_t edge_g = (1.f - t)*img[4*idx + 1];
+                uint8_t edge_b = (1.f - t)*img[4*idx + 2];
 
-                int min_dist = 9999;
+                int min_dist = 256*3;
                 for (int i = 0; i < ci; i++) {
                     int dist = std::abs((int)rs[i] - edge_r) + std::abs((int)gs[i] - edge_g) + std::abs((int)bs[i] - edge_b);
                     if (dist < min_dist) {
@@ -138,6 +101,48 @@ extern "C" {
                         dst[4*idx + 2] = bs[i];
                     }
                 }
+
+                delete[] rs; delete[] gs; delete[] bs;
             }
+    }
+
+    void kdQuantization(uint8_t* src, uint8_t* dst, int height, int width, int palette_size) {
+        const int KD_DEPTH = 12;
+        const int size = height * width;
+
+        int* labels = new int[size];
+        uint8_t* quantized = new uint8_t[3 * (1 << KD_DEPTH)];
+        uint8_t* centroids = new uint8_t[3 * palette_size];
+
+        int label_size = KDlabel(src, size, KD_DEPTH, labels, quantized);
+
+        for (int i = 0; i < palette_size; i++) {
+            int index = i * label_size / palette_size;
+            
+            centroids[3 * i] = quantized[3 * index];
+            centroids[3 * i + 1] = quantized[3 * index + 1];
+            centroids[3 * i + 2] = quantized[3 * index + 2];
+        }
+        
+        for (int i = 0; i < size; i++) {
+            int min_dist = 256 * 3;
+            for (int c_idx = 0; c_idx < palette_size; c_idx++) {
+                int dist = std::abs((int)quantized[3 * labels[i]] - centroids[3 * c_idx])
+                            + std::abs((int)quantized[3 * labels[i] + 1] - centroids[3 * c_idx + 1])
+                            + std::abs((int)quantized[3 * labels[i] + 2] - centroids[3 * c_idx + 2]);
+
+                if (min_dist > dist) {
+                    min_dist = dist;
+                    dst[4 * i] = centroids[3 * c_idx];
+                    dst[4 * i + 1] = centroids[3 * c_idx + 1];
+                    dst[4 * i + 2] = centroids[3 * c_idx + 2];
+                }
+            }
+            dst[4 * i + 3] = src[4 * i + 3];
+        }
+
+        delete[] labels;
+        delete[] quantized;
+        delete[] centroids;
     }
 }
