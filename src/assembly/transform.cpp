@@ -125,7 +125,7 @@ extern "C" {
         int* label_cluster = new int[label_size];
 
         for (int i = 0; i < palette_size; i++) {
-            int index = i * label_size / palette_size;
+            int index = i * (label_size - 1) / (palette_size - 1);
             
             centroids[3 * i] = quantized[3 * index];
             centroids[3 * i + 1] = quantized[3 * index + 1];
@@ -197,5 +197,12 @@ extern "C" {
         delete[] labels;
         delete[] quantized;
         delete[] centroids;
+
+        delete[] cluster_length;
+        delete[] cluster_size;
+        delete[] label_cluster;
+        for(int i = 0; i < palette_size; i++)
+            delete[] clusters[i];
+        delete[] clusters;
     }
 }
