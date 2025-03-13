@@ -33,7 +33,7 @@ extern "C" {
                 int idx = y * new_width + x;
 
                 uint8_t* channel_value = new uint8_t[cell_size];
-                for (int channel = 0; channel < 3; channel++) {
+                for (int channel = 0; channel < 4; channel++) {
                     int ci = 0;
                     for (int cy = cy_start; cy < cy_end; cy++)
                         for (int cx = cx_start; cx < cx_end; cx++)
@@ -42,7 +42,6 @@ extern "C" {
                     std::sort(channel_value, channel_value + cell_size);
                     dst[4*idx + channel] = channel_value[cell_size / 2];
                 }
-                dst[4*idx + 3] = src[4*idx + 3];
                 delete[] channel_value;
             }
     }
