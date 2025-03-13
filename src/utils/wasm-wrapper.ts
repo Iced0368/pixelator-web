@@ -1,134 +1,101 @@
 import cv, { type Mat } from 'opencv-ts';
 import TransformModule from '../assembly/build/transform.js'
 
-export async function pixelateImageDataWASM
-(
-    imageData: ImageData, 
-    newHeight: number, 
-    newWidth: number, 
-    paletteSize: number,
-    threshold: number = 0, 
-    sensitivity: number = 0
-) 
-{
-    const height = imageData.height;
-    const width = imageData.width;
-
-    const Module = await TransformModule();
-
-    const srcPtr = Module._malloc(imageData.data.length);
-    const outputPtr = Module._malloc(4 * newHeight * newWidth);
-    const edgePtr = Module._malloc(imageData.data.length);
-    const edgenessPtr = Module._malloc(4 * newHeight * newWidth);
-
-    Module.HEAPU8.set(imageData.data, srcPtr);
-
-    Module._pixelateImageData(
-        srcPtr, outputPtr, edgePtr, edgenessPtr,
-        imageData.height, imageData.width, paletteSize,
-        newHeight, newWidth, 
-        threshold, sensitivity
-    );
-
-    const pixelatedData = new Uint8ClampedArray(4 * newHeight * newWidth);
-    const edgeData = new Uint8ClampedArray(height * width);
-    const edgenessData = new Uint8ClampedArray(newHeight * newWidth);
-    
-    pixelatedData.set(Module.HEAPU8.subarray(outputPtr, outputPtr + pixelatedData.length));
-    edgeData.set(Module.HEAPU8.subarray(edgePtr, edgePtr + edgeData.length));
-    edgenessData.set(Module.HEAPU8.subarray(edgenessPtr, edgenessPtr + edgenessData.length));
-    
-    Module._free(srcPtr);
-    Module._free(outputPtr);
-    Module._free(edgePtr);
-    Module._free(edgenessPtr);
-
-    const _edgeData = Uint8ClampedArray.from(Array.from(edgeData).map(x => [x, x, x, 255]).flat());
-    const _edgenessData = Uint8ClampedArray.from(Array.from(edgenessData).map(x => [x, x, x, 255]).flat());
-
-    return {
-        output: new ImageData(pixelatedData, newWidth, newHeight),
-        edge: new ImageData(_edgeData, width, height),
-        edgeness: new ImageData(_edgenessData, newWidth, newHeight),
-    };
-}
-
 const Module: WebAssembly.Module & {
-    _malloc: (length: number) => Uint8Pointer,
-    _free: (length: number) => Uint8Pointer,
+    _malloc: (length: number) => number,
+    _free: (length: number) => void,
     _medianResize: (
-        src: Uint8Pointer, dst: Uint8Pointer, 
+        srcPtr: number, dstPtr: number, 
         height: number, width: number,
         newHeight: number, newWidth: number, 
     ) => void,
-    _convertGrayToRGBA: (src: Uint8Pointer, dst: Uint8Pointer, length: number) => void,
+    _convertGrayToRGBA: (srcPtr: number, dstPtr: number, length: number) => void,
     _emphasizeEdge: (
-        srcPtr: Uint8Pointer, dstPtr: Uint8Pointer, imgPtr: Uint8Pointer, 
-        edgePtr: Uint8Pointer, edgenessPtr: Uint8Pointer,
+        srcPtr: number, dstPtr: number, imgPtr: number, 
+        edgePtr: number, edgenessPtr: number,
         height: number, width: number,
         newHeight: number, newWidth: number, 
         sensitivity: number
     ) => void,
+    _kdMeansQuantization: (
+        src: number, dst: number,
+        height: number, width: number, k: number
+    ) => void,
 }
 = await TransformModule();
 
-export type Uint8Pointer = any;
-export function Uint8Pointer(length: number): Uint8Pointer;
-export function Uint8Pointer(array: Uint8ClampedArray): Uint8Pointer;
+export class CArray { 
+    ptr: number;
+    length: number;
 
-export function Uint8Pointer(arg: number | Uint8ClampedArray) {
-    if (typeof arg === 'number') {
-        const ptr: Uint8Pointer = Module._malloc(arg);
-        return ptr;
+    constructor(arg: number | Uint8ClampedArray | undefined) {
+        if (arg === undefined) {
+            this.ptr = 0;
+            this.length = 0;
+        }
+        else if (typeof arg === 'number') {
+            this.ptr = Module._malloc(arg);
+            this.length = arg;
+        }
+        else {
+            const ptr = Module._malloc(arg.length);
+            Module.HEAPU8.set(arg, ptr);
+            this.ptr = ptr;
+            this.length = arg.length;
+        }
     }
-    else {
-        const ptr: Uint8Pointer = Module._malloc(arg.length);
-        Module.HEAPU8.set(arg, ptr);
-        return ptr;
-    }
-}
-export function free(ptr: Uint8Pointer) {
-    Module._free(ptr);
+
+};
+
+export function free(cArray: CArray) {
+    Module._free(cArray.ptr);
 }
 
-export function convertPtrToArray(ptr: Uint8Pointer, length: number) {
-    const array = new Uint8ClampedArray(length);
-    array.set(Module.HEAPU8.subarray(ptr, ptr + length));
+export function convertCArrayToArray(cArray: CArray) {
+    const array = new Uint8ClampedArray(cArray.length);
+    array.set(Module.HEAPU8.subarray(cArray.ptr, cArray.ptr + cArray.length));
     return array;
 }
 
 export function medianResize
 (
-    srcPtr: Uint8Pointer, dstPtr:Uint8Pointer,
+    src: CArray, dst:CArray,
     height: number, width: number,
     newHeight: number, newWidth: number, 
 ) 
 {
     Module._medianResize(
-        srcPtr, dstPtr,
+        src.ptr, dst.ptr,
         height, width,
         newHeight, newWidth, 
     );
 }
 
 export function convertGrayToRGBA(
-    srcPtr: Uint8Pointer, dstPtr: Uint8Pointer, length: number
+    src: CArray, dst: CArray
 ) {
-    Module._convertGrayToRGBA(srcPtr, dstPtr, length);
+    Module._convertGrayToRGBA(src.ptr, dst.ptr, src.length);
 }
 
 export function emphasizeEdge(
-    srcPtr: Uint8Pointer, dstPtr: Uint8Pointer, imgPtr: Uint8Pointer, 
-    edgePtr: Uint8Pointer, edgenessPtr: Uint8Pointer,
+    src: CArray, dst: CArray, img: CArray, 
+    edge: CArray, edgeness: CArray,
     height: number, width: number,
     newHeight: number, newWidth: number, 
     sensitivity: number
 ) {
     Module._emphasizeEdge(
-        srcPtr, dstPtr, imgPtr, edgePtr, edgenessPtr,
+        src.ptr, dst.ptr, img.ptr, edge.ptr, edgeness.ptr,
         height, width, newHeight, newWidth, 
         sensitivity
     );
+}
+
+export function kdMeansQuantization(
+    src: CArray, dst: CArray,
+    height: number, width: number, k: number
+) {
+    Module._kdMeansQuantization(src.ptr, dst.ptr, height, width, k);
 }
 
 export function kmeansQuantization(srcMat: Mat, dstMat: Mat, k: number) {
@@ -150,15 +117,12 @@ export function kmeansQuantization(srcMat: Mat, dstMat: Mat, k: number) {
     const centers8U = new cv.Mat();
     centers.convertTo(centers8U, cv.CV_8U);
 
-    const channels = centers8U.cols;
-
-    for (let i = 0; i < N; i++)
-        for (let channel = 0; channel < channels; channel++) {
-            
-            dstMat.data[i * channels + channel] = centers8U.ucharAt(
-                labels.intAt(i), channel
-            );
-        }
+    for (let i = 0; i < N; i++) {
+        dstMat.data[4 * i] = centers8U.ucharAt(labels.intAt(i), 0);
+        dstMat.data[4 * i + 1] = centers8U.ucharAt(labels.intAt(i), 1);
+        dstMat.data[4 * i + 2] = centers8U.ucharAt(labels.intAt(i), 2);
+        dstMat.data[4 * i + 3] = srcMat.data[4 * i + 3];
+    }
 
     console.timeEnd("label");
 

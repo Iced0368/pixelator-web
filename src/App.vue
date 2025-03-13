@@ -5,8 +5,6 @@ import { pixelateImageData } from './utils/transform';
 import ImageUploadBox from './components/ImageUploadBox.vue';
 import ArrowIcon from './assets/next-arrow.svg'
 import { CanvasWithImageData, InputAndSlider, Tab, TabItem } from './components/common';
-import { pixelateImageDataWASM } from './utils/wasm-wrapper';
-
 
 const inputImageData = ref<ImageData>(new ImageData(1, 1));
 
@@ -19,7 +17,7 @@ const outputImageDatas = reactive({
 const maxSize = reactive({height: 0, width: 0});
 const outputSize = reactive({height: 0, width: 0});
 const preserveRatio = ref(true);
-const paletteSize = ref(32);
+const paletteSize = ref(64);
 
 const threshold = ref(0.2);
 const sensitivity = ref(30);

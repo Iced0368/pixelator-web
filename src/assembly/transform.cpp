@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <string.h>
 #include <algorithm>
 #include <iostream>
 
@@ -31,17 +32,18 @@ extern "C" {
                 int cell_size = cell_height * cell_width;
                 int idx = y * new_width + x;
 
-                uint8_t* channel = new uint8_t[cell_size];
-                for (int i = 0; i < 4; i++) {
+                uint8_t* channel_value = new uint8_t[cell_size];
+                for (int channel = 0; channel < 3; channel++) {
                     int ci = 0;
                     for (int cy = cy_start; cy < cy_end; cy++)
                         for (int cx = cx_start; cx < cx_end; cx++)
-                            channel[ci++] = src[4 * (cy * width + cx) + i];
+                            channel_value[ci++] = src[4 * (cy * width + cx) + channel];
 
-                    std::sort(channel, channel + cell_size);
-                    dst[4*idx + i] = channel[cell_size / 2];
+                    std::sort(channel_value, channel_value + cell_size);
+                    dst[4*idx + channel] = channel_value[cell_size / 2];
                 }
-                delete[] channel;
+                dst[4*idx + 3] = src[4*idx + 3];
+                delete[] channel_value;
             }
     }
 
@@ -106,15 +108,22 @@ extern "C" {
             }
     }
 
-    void kdQuantization(uint8_t* src, uint8_t* dst, int height, int width, int palette_size) {
+    void kdMeansQuantization(uint8_t* src, uint8_t* dst, int height, int width, int palette_size) {
         const int KD_DEPTH = 12;
         const int size = height * width;
 
         int* labels = new int[size];
         uint8_t* quantized = new uint8_t[3 * (1 << KD_DEPTH)];
-        uint8_t* centroids = new uint8_t[3 * palette_size];
 
-        int label_size = KDlabel(src, size, KD_DEPTH, labels, quantized);
+        int label_size = KDLabel(src, size, KD_DEPTH, labels, quantized);
+        printf("label_size= %d\n", label_size);
+
+        float* centroids = new float[3 * palette_size];
+        int** clusters = new int*[palette_size];
+
+        int* cluster_length = new int[palette_size];
+        int* cluster_size = new int[palette_size];
+        int* label_cluster = new int[label_size];
 
         for (int i = 0; i < palette_size; i++) {
             int index = i * label_size / palette_size;
@@ -122,22 +131,67 @@ extern "C" {
             centroids[3 * i] = quantized[3 * index];
             centroids[3 * i + 1] = quantized[3 * index + 1];
             centroids[3 * i + 2] = quantized[3 * index + 2];
-        }
-        
-        for (int i = 0; i < size; i++) {
-            int min_dist = 256 * 3;
-            for (int c_idx = 0; c_idx < palette_size; c_idx++) {
-                int dist = std::abs((int)quantized[3 * labels[i]] - centroids[3 * c_idx])
-                            + std::abs((int)quantized[3 * labels[i] + 1] - centroids[3 * c_idx + 1])
-                            + std::abs((int)quantized[3 * labels[i] + 2] - centroids[3 * c_idx + 2]);
 
-                if (min_dist > dist) {
-                    min_dist = dist;
-                    dst[4 * i] = centroids[3 * c_idx];
-                    dst[4 * i + 1] = centroids[3 * c_idx + 1];
-                    dst[4 * i + 2] = centroids[3 * c_idx + 2];
+            clusters[i] = new int[label_size];
+        }
+
+        int* hist = new int[label_size]();
+        for (int i = 0; i < size; i++)
+            hist[labels[i]]++;
+
+        int cnt = 0;
+        bool updated = true;
+        while (updated && cnt++ < 100) {
+            updated = false;
+            memset(cluster_size, 0, sizeof(int) * palette_size);
+            memset(cluster_length, 0, sizeof(int) * palette_size);
+
+            for (int i = 0; i < label_size; i++) {
+                int closest_cluster = 0;
+                float min_dist = 256 * 3;
+                for (int c_idx = 0; c_idx < palette_size; c_idx++) {
+                    float dist = std::abs(quantized[3 * i] - centroids[3 * c_idx])
+                                + std::abs(quantized[3 * i + 1] - centroids[3 * c_idx + 1])
+                                + std::abs(quantized[3 * i + 2] - centroids[3 * c_idx + 2]);
+    
+                    if (min_dist > dist) {
+                        min_dist = dist;
+                        closest_cluster = c_idx;
+                    }
+                }
+                clusters[closest_cluster][cluster_length[closest_cluster]++] = i;
+                cluster_size[closest_cluster] += hist[i];
+
+                label_cluster[i] = closest_cluster;
+            }
+
+            uint8_t* channel_value = new uint8_t[palette_size];
+            for (int c_idx = 0; c_idx < palette_size; c_idx++) {
+                float dist = 0;
+                for (int channel = 0; channel < 3; channel++) {
+                    float value = 0;
+                    for (int i = 0; i < cluster_length[c_idx]; i++)
+                        value += (float)hist[clusters[c_idx][i]] * quantized[3 * clusters[c_idx][i] + channel] / cluster_size[c_idx];
+
+                    float new_centroid_value = value;
+                    dist += std::abs(centroids[3 * c_idx + channel] - new_centroid_value);
+
+                    centroids[3 * c_idx + channel] = new_centroid_value;
+                }
+
+                if (dist >= 1) {
+                    updated = true;
                 }
             }
+            delete[] channel_value;
+        }
+
+        printf("k-means iteration= %d\n", cnt);
+
+        for (int i = 0; i < size; i++) {
+            dst[4 * i]     = centroids[3 * label_cluster[labels[i]]];
+            dst[4 * i + 1] = centroids[3 * label_cluster[labels[i]] + 1];
+            dst[4 * i + 2] = centroids[3 * label_cluster[labels[i]] + 2];
             dst[4 * i + 3] = src[4 * i + 3];
         }
 
