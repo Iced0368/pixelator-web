@@ -1,4 +1,3 @@
-import cv, { type Mat } from 'opencv-ts';
 import TransformModule from '../assembly/build/transform.js'
 
 const Module: WebAssembly.Module & {
@@ -19,8 +18,15 @@ const Module: WebAssembly.Module & {
     ) => void,
     _kdMeansQuantization: (
         src: number, dst: number,
-        height: number, width: number, k: number
+        height: number, width: number, 
+        palette: number, k: number,
+        mode: number,
     ) => void,
+    _dithering: (
+        src: number, dst: number,
+        height: number, width: number, 
+        palette: number, palette_size: number,
+    ) => void
 }
 = await TransformModule();
 
@@ -93,38 +99,26 @@ export function emphasizeEdge(
 
 export function kdMeansQuantization(
     src: CArray, dst: CArray,
-    height: number, width: number, k: number
+    height: number, width: number, 
+    palette: CArray, palette_size: number,
+    mode: number,
 ) {
-    Module._kdMeansQuantization(src.ptr, dst.ptr, height, width, k);
+    Module._kdMeansQuantization(
+        src.ptr, dst.ptr, 
+        height, width, 
+        palette.ptr, palette_size,
+        mode,
+    );
 }
 
-export function kmeansQuantization(srcMat: Mat, dstMat: Mat, k: number) {
-    const samples = new cv.Mat();
-    srcMat.convertTo(samples, cv.CV_32F);
-
-    const N = samples.rows * samples.cols;
-
-    samples.cols = N;
-    samples.rows = 1;
-
-    const labels = new cv.Mat();
-    const centers = new cv.Mat();
-    const criteria = new cv.TermCriteria(3, 10, 1.0);
-
-    cv.kmeans(samples, k, labels, criteria, 1, cv.KMEANS_PP_CENTERS, centers);
-
-    console.time("label");
-    const centers8U = new cv.Mat();
-    centers.convertTo(centers8U, cv.CV_8U);
-
-    for (let i = 0; i < N; i++) {
-        dstMat.data[4 * i] = centers8U.ucharAt(labels.intAt(i), 0);
-        dstMat.data[4 * i + 1] = centers8U.ucharAt(labels.intAt(i), 1);
-        dstMat.data[4 * i + 2] = centers8U.ucharAt(labels.intAt(i), 2);
-        dstMat.data[4 * i + 3] = srcMat.data[4 * i + 3];
-    }
-
-    console.timeEnd("label");
-
-    samples.delete(); labels.delete(); centers.delete();
+export function dithering(
+    src: CArray, dst: CArray,
+    height: number, width: number,
+    palette: CArray, palette_size: number,
+) {
+    Module._dithering(
+        src.ptr, dst.ptr,
+        height, width, 
+        palette.ptr, palette_size
+    );
 }

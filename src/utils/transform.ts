@@ -1,13 +1,17 @@
 import cv from 'opencv-ts';
-import { convertGrayToRGBA, convertCArrayToArray, emphasizeEdge, free, medianResize, CArray, kdMeansQuantization } from './wasm-wrapper';
+import { convertGrayToRGBA, convertCArrayToArray, emphasizeEdge, free, medianResize, CArray, kdMeansQuantization, dithering } from './wasm-wrapper';
 
 export function pixelateImageData(
-    imageData: ImageData, 
+    imageData: ImageData,
+    paletteData: ImageData | undefined,
     newHeight: number, 
     newWidth: number, 
+
     paletteSize: number,
-    threshold: number = 0, 
-    sensitivity: number = 0
+    threshold: number, 
+    sensitivity: number,
+
+    doDithering: boolean,
 ) {
     const height = imageData.height;
     const width = imageData.width;
@@ -17,12 +21,11 @@ export function pixelateImageData(
 
     console.time("median");
 
-    const dataPtr = new CArray(imageData.data);
-    const medianPtr = new CArray(4 * newHeight * newWidth);
-
+    const dataArray = new CArray(imageData.data);
+    const medianArray = new CArray(4 * newHeight * newWidth);
 
     medianResize(
-        dataPtr, medianPtr,
+        dataArray, medianArray,
         height, width,
         newHeight, newWidth
     );
@@ -33,46 +36,100 @@ export function pixelateImageData(
     
     cv.Canny(dataMat, edge, threshold * 1024, 2*threshold * 1024);
 
-    const edgePtr = new CArray(Uint8ClampedArray.from(edge.data));
-    const edgenessPtr = new CArray(newHeight * newWidth);
+    const edgeArray = new CArray(Uint8ClampedArray.from(edge.data));
+    const edgenessArray = new CArray(newHeight * newWidth);
 
-    const edgeRGBAPtr = new CArray(4 * edge.data.length);
-    const edgenessRGBAPtr = new CArray(4 * newHeight * newWidth);
+    const edgeRGBAArray = new CArray(4 * edge.data.length);
+    const edgenessRGBAArray = new CArray(4 * newHeight * newWidth);
 
-    convertGrayToRGBA(edgePtr, edgeRGBAPtr);
+    convertGrayToRGBA(edgeArray, edgeRGBAArray);
 
     console.timeEnd("canny");
 
     console.time("emphasize");
-    emphasizeEdge(dataPtr, medianPtr, medianPtr, edgePtr, edgenessPtr, height, width, newHeight, newWidth, sensitivity);
-    convertGrayToRGBA(edgenessPtr, edgenessRGBAPtr);
+    emphasizeEdge(dataArray, medianArray, medianArray, edgeArray, edgenessArray, height, width, newHeight, newWidth, sensitivity);
+    convertGrayToRGBA(edgenessArray, edgenessRGBAArray);
     console.timeEnd("emphasize");
 
-    const edgeData = convertCArrayToArray(edgeRGBAPtr);
-    let resizedData = convertCArrayToArray(medianPtr);
-    const edgenessData = convertCArrayToArray(edgenessRGBAPtr);
-    
+    const edgeData = convertCArrayToArray(edgeRGBAArray);
+    const edgenessData = convertCArrayToArray(edgenessRGBAArray);
+    let outputData = convertCArrayToArray(medianArray);
+    let outputPaletteData = undefined;
 
-    if (paletteSize > 0) {
+    const paletteWidth = 16 * Math.ceil(Math.sqrt(paletteSize) / 16);
+    const paletteHeight = Math.ceil(paletteSize / paletteWidth);
+
+    //in
+    if (paletteData !== undefined) {
+        const paletteArray = new CArray(paletteData.data);
+        const quantizedArray = new CArray(medianArray.length);
+        
         console.time("quantize");
-        kdMeansQuantization(medianPtr, medianPtr, newHeight, newWidth, paletteSize);
-        resizedData = convertCArrayToArray(medianPtr);
+        kdMeansQuantization(
+            medianArray, quantizedArray, 
+            newHeight, newWidth, 
+            paletteArray, paletteSize, 0
+        );
         console.timeEnd("quantize");
+
+        if (doDithering) {
+            console.time("dithering");
+            dithering(
+                medianArray, quantizedArray, 
+                newHeight, newWidth, 
+                paletteArray, paletteSize
+            );
+            console.timeEnd("dithering");
+        }
+        outputData = convertCArrayToArray(quantizedArray);
+
+        free(paletteArray);
+        free(quantizedArray);
+    }
+    //out
+    else if (paletteSize > 0) {
+        const paletteArray = new CArray(4 * paletteHeight * paletteWidth);
+        const quantizedArray = new CArray(medianArray.length);
+
+        console.time("quantize");
+        kdMeansQuantization(
+            medianArray, quantizedArray, 
+            newHeight, newWidth, 
+            paletteArray, paletteSize, 1
+        );
+        console.timeEnd("quantize");
+
+        if (doDithering) {
+            console.time("dithering");
+            dithering(
+                medianArray, quantizedArray, 
+                newHeight, newWidth,
+                paletteArray, paletteSize
+            );
+            console.timeEnd("dithering");
+        }
+
+        outputData = convertCArrayToArray(quantizedArray);
+        outputPaletteData = convertCArrayToArray(paletteArray);
+        
+        free(paletteArray);
+        free(quantizedArray);
     }
 
     dataMat.delete();
     edge.delete();
 
-    free(dataPtr);
-    free(medianPtr);
-    free(edgePtr);
-    free(edgenessPtr);
-    free(edgeRGBAPtr);
-    free(edgenessRGBAPtr);
+    free(dataArray);
+    free(medianArray);
+    free(edgeArray);
+    free(edgenessArray);
+    free(edgeRGBAArray);
+    free(edgenessRGBAArray);
 
     return {
-        output: new ImageData(resizedData, newWidth, newHeight),
+        output: new ImageData(outputData, newWidth, newHeight),
         edge: new ImageData(edgeData, width, height),
         edgeness: new ImageData(edgenessData, newWidth, newHeight),
+        palette: outputPaletteData ? new ImageData(outputPaletteData, paletteWidth, paletteHeight) : undefined,
     }
 }

@@ -18,8 +18,14 @@ onMounted(() => {
 </script>
 
 <template>
-    <slot v-if="activeTabIndex === tabIndex"></slot>
+    <div v-show="activeTabIndex === tabIndex">
+        <slot></slot>
+    </div>
 </template>
 
 <style scoped>
+div {
+    width: 100%;
+    height: 100%;
+}
 </style>

@@ -6,7 +6,6 @@ const isDragging = ref(false);
 const uploadedFile = ref<File>();
 const imageSrc = ref("");
 
-
 const emit = defineEmits();
 
 const handleDragOver = (event: Event) => {
@@ -53,6 +52,11 @@ const readImageAsData = (file: File) => {
     reader.readAsDataURL(file);
 }
 
+const handleCancel = () => {
+    uploadedFile.value = undefined;
+    emit("cancel");
+}
+
 </script>
 
 <template>
@@ -84,6 +88,7 @@ const readImageAsData = (file: File) => {
             class="file-info"
         >   
             <img :src="imageSrc">
+            <button @click="handleCancel">X</button>
         </div>
 
     </div>
@@ -144,6 +149,7 @@ const readImageAsData = (file: File) => {
     }
 
     .file-info {
+        position: relative;
         display: flex;
         flex-direction: column;
         align-items: flex-start;
@@ -160,6 +166,21 @@ const readImageAsData = (file: File) => {
             image-rendering: pixelated;
 
             margin: 0 auto;
+        }
+
+        button {
+            position: absolute;
+            opacity: 0;
+            top: 0;
+            right: 0;
+
+            transition: 0.2s opacity;
+        }
+    }
+
+    .file-info:hover {
+        button {
+            opacity: 1;
         }
     }
 

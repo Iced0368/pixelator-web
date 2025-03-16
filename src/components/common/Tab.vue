@@ -47,7 +47,6 @@ provide('activeTabIndex', activeTabIndex);
     .tab-button {
         padding: 5px 10px;
         cursor: pointer;
-
     }
 
     .tab-button.active {

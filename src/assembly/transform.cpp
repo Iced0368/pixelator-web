@@ -2,8 +2,34 @@
 #include <string.h>
 #include <algorithm>
 #include <iostream>
+#include <limits>
 
 #include "kdlabel.cpp"
+
+template <typename T, typename U>
+float rgb_distance(T* a, U* b) {
+    float d[3]; 
+    d[0] = (float)a[0] - b[0];
+    d[1] = (float)a[1] - b[1];
+    d[2] = (float)a[2] - b[2];
+
+    return std::sqrt(d[0]*d[0] +  d[1]*d[1] + d[2]*d[2]);
+}
+
+template <typename T, typename U>
+int find_closest(T* target, U* palette, int palette_size, int palette_stride=3) {
+    float min_dist = std::numeric_limits<float>::max();
+    int res = 0;
+
+    for (int i = 0; i < palette_size; i++) {
+        float dist = rgb_distance(target, &palette[palette_stride*i]);
+        if (min_dist > dist) {
+            min_dist = dist;
+            res = i;
+        }
+    }
+    return res;
+}
 
 extern "C" {
     void convertGrayToRGBA(uint8_t* src, uint8_t* dst, int length) {
@@ -65,9 +91,7 @@ extern "C" {
                 int cell_size = cell_height * cell_width;
                 int idx = y * new_width + x;
 
-                uint8_t* rs = new uint8_t[cell_size];
-                uint8_t* gs = new uint8_t[cell_size];
-                uint8_t* bs = new uint8_t[cell_size];
+                uint8_t* rgbs = new uint8_t[3 * cell_size];
 
                 int ci = 0;
                 int edge_cnt = 0;
@@ -78,9 +102,9 @@ extern "C" {
                         if (edge[s_idx]) 
                             edge_cnt++;
 
-                        rs[ci] = src[4*s_idx];
-                        gs[ci] = src[4*s_idx + 1];
-                        bs[ci] = src[4*s_idx + 2];
+                        rgbs[3 * ci] = src[4*s_idx];
+                        rgbs[3 * ci + 1] = src[4*s_idx + 1];
+                        rgbs[3 * ci + 2] = src[4*s_idx + 2];
                         ci++;
                     }
 
@@ -88,26 +112,58 @@ extern "C" {
 
                 float t = std::powf((float)edge_cnt / cell_size, 100.f / sensitivity - 1);
 
-                uint8_t edge_r = (1.f - t)*img[4*idx];
-                uint8_t edge_g = (1.f - t)*img[4*idx + 1];
-                uint8_t edge_b = (1.f - t)*img[4*idx + 2];
+                uint8_t edge_rgb[3] = { 
+                    (uint8_t)((1.f - t)*img[4*idx]),
+                    (uint8_t)((1.f - t)*img[4*idx + 1]),
+                    (uint8_t)((1.f - t)*img[4*idx + 2])
+                };
 
-                int min_dist = 256*3;
-                for (int i = 0; i < ci; i++) {
-                    int dist = std::abs((int)rs[i] - edge_r) + std::abs((int)gs[i] - edge_g) + std::abs((int)bs[i] - edge_b);
-                    if (dist < min_dist) {
-                        min_dist = dist;
-                        dst[4*idx]     = rs[i];
-                        dst[4*idx + 1] = gs[i];
-                        dst[4*idx + 2] = bs[i];
-                    }
-                }
+                int closest_idx = find_closest(edge_rgb, rgbs, cell_size);
+                dst[4*idx]     = rgbs[3*closest_idx];
+                dst[4*idx + 1] = rgbs[3*closest_idx + 1];
+                dst[4*idx + 2] = rgbs[3*closest_idx + 2];
 
-                delete[] rs; delete[] gs; delete[] bs;
+                delete[] rgbs;
             }
     }
 
-    void kdMeansQuantization(uint8_t* src, uint8_t* dst, int height, int width, int palette_size) {
+    void kdMeansQuantizationPaletteIn(
+        uint8_t* src, uint8_t* dst, 
+        int height, int width, 
+        uint8_t* palette, int palette_size
+    ) {
+        const int size = height * width;
+
+
+        float* centroids = new float[3 * palette_size];
+        int _palette_size = 0;
+        for(int i = 0; i < palette_size; i++) {
+            if (palette[4*i + 3]) {
+                centroids[3*i] = palette[4*_palette_size];
+                centroids[3*i + 1] = palette[4*_palette_size + 1];
+                centroids[3*i + 2] = palette[4*_palette_size + 2];
+                _palette_size++;
+            }
+        }
+        palette_size = _palette_size;
+
+        printf("palette size= %d\n", palette_size);
+
+        for (int i = 0; i < size; i++) {
+            int closest_cluster = find_closest(&src[4*i], centroids, palette_size);
+
+            dst[4*i] = palette[4*closest_cluster];
+            dst[4*i + 1] = palette[4*closest_cluster + 1];
+            dst[4*i + 2] = palette[4*closest_cluster + 2];
+            dst[4*i + 3] = src[4*i + 3];
+        }
+    }
+
+    void kdMeansQuantizationPaletteOut(
+        uint8_t* src, uint8_t* dst, 
+        int height, int width, 
+        uint8_t* palette, int palette_size
+    ) {
         const int KD_DEPTH = 12;
         const int size = height * width;
 
@@ -125,7 +181,7 @@ extern "C" {
         int* label_cluster = new int[label_size];
 
         for (int i = 0; i < palette_size; i++) {
-            int index = i * (label_size - 1) / (palette_size - 1);
+            int index = i * label_size / palette_size;
             
             centroids[3 * i] = quantized[3 * index];
             centroids[3 * i + 1] = quantized[3 * index + 1];
@@ -146,18 +202,8 @@ extern "C" {
             memset(cluster_length, 0, sizeof(int) * palette_size);
 
             for (int i = 0; i < label_size; i++) {
-                int closest_cluster = 0;
-                float min_dist = 256 * 3;
-                for (int c_idx = 0; c_idx < palette_size; c_idx++) {
-                    float dist = std::abs(quantized[3 * i] - centroids[3 * c_idx])
-                                + std::abs(quantized[3 * i + 1] - centroids[3 * c_idx + 1])
-                                + std::abs(quantized[3 * i + 2] - centroids[3 * c_idx + 2]);
-    
-                    if (min_dist > dist) {
-                        min_dist = dist;
-                        closest_cluster = c_idx;
-                    }
-                }
+                int closest_cluster = find_closest(&quantized[3*i], centroids, palette_size);
+
                 clusters[closest_cluster][cluster_length[closest_cluster]++] = i;
                 cluster_size[closest_cluster] += hist[i];
 
@@ -166,17 +212,19 @@ extern "C" {
 
             uint8_t* channel_value = new uint8_t[palette_size];
             for (int c_idx = 0; c_idx < palette_size; c_idx++) {
-                float dist = 0;
+                float new_centroid[3];
                 for (int channel = 0; channel < 3; channel++) {
                     float value = 0;
                     for (int i = 0; i < cluster_length[c_idx]; i++)
                         value += (float)hist[clusters[c_idx][i]] * quantized[3 * clusters[c_idx][i] + channel] / cluster_size[c_idx];
 
-                    float new_centroid_value = value;
-                    dist += std::abs(centroids[3 * c_idx + channel] - new_centroid_value);
-
-                    centroids[3 * c_idx + channel] = new_centroid_value;
+                    new_centroid[channel] = value;
                 }
+                float dist = rgb_distance(&centroids[3 * c_idx], new_centroid);
+
+                centroids[3 * c_idx] = new_centroid[0];
+                centroids[3 * c_idx + 1] = new_centroid[1];
+                centroids[3 * c_idx + 2] = new_centroid[2];
 
                 if (dist >= 1) {
                     updated = true;
@@ -194,6 +242,16 @@ extern "C" {
             dst[4 * i + 3] = src[4 * i + 3];
         }
 
+        if (palette != nullptr) {
+            for (int i = 0; i < palette_size; i++) {
+                palette[4 * i] = centroids[3 * i];
+                palette[4 * i + 1] = centroids[3 * i + 1];
+                palette[4 * i + 2] = centroids[3 * i + 2];
+                palette[4 * i + 3] = 255;
+            }
+            std::sort((uint32_t*)palette, (uint32_t*)palette + palette_size);
+        }
+
         delete[] labels;
         delete[] quantized;
         delete[] centroids;
@@ -204,5 +262,75 @@ extern "C" {
         for(int i = 0; i < palette_size; i++)
             delete[] clusters[i];
         delete[] clusters;
+    }
+
+    void kdMeansQuantization(
+        uint8_t* src, uint8_t* dst, 
+        int height, int width, 
+        uint8_t* palette, int palette_size,
+        int mode
+    ) {
+        if (mode == 0) {
+            kdMeansQuantizationPaletteIn(src, dst, height, width, palette, palette_size);
+        }
+        else if (mode == 1){
+            kdMeansQuantizationPaletteOut(src, dst, height, width, palette, palette_size);
+        }
+    };
+
+    void dithering(
+        uint8_t* src, uint8_t* dst,
+        int height, int width,
+        uint8_t* palette, int palette_size
+    ) {
+        int size = height * width;
+        int* img = new int[4 * size];
+        for (int i = 0; i < 4 * size; i++)
+            img[i] = src[i];
+
+        //memcpy(dst, src, sizeof(uint8_t) * size * 4);
+
+        for(int i = 0; i < palette_size; i++)
+            printf("%d: %d %d %d\n", i, palette[4*i], palette[4*i+1], palette[4*i+2]);
+
+        printf("%d\n", palette_size);
+
+        int dy[] = {0, 1, 1, 1};
+        int dx[] = {1, -1, 0, 1};
+        int weight[] = {7, 3, 5, 1};
+        int weight_sum = 16;
+
+        for(int y = 0; y < height; y++)
+            for(int x = 0; x < width; x++) {
+                int index = y * width + x;
+
+                int* old_pixel = &img[4*index];
+                int ci = find_closest(old_pixel, palette, palette_size, 4);
+                uint8_t* new_pixel = &palette[4 * ci];
+
+                int quant_error[3] = {
+                    src[4*index + 0] - new_pixel[0],
+                    src[4*index + 1] - new_pixel[1],
+                    src[4*index + 2] - new_pixel[2],
+                };
+
+                dst[4*index] =  new_pixel[0];
+                dst[4*index + 1] = new_pixel[1];
+                dst[4*index + 2] = new_pixel[2];
+                dst[4*index + 3] = src[4*index + 3];
+
+                for (int i = 0; i < 4; i++) {
+                    int ny = y + dy[i];
+                    int nx = x + dx[i];
+                    if (ny < 0 || ny >= height || nx < 0 || nx >= width)
+                        continue;
+
+                    int nindex = ny * width + nx;
+
+                    img[4*nindex] += weight[i]*quant_error[0] / weight_sum;
+                    img[4*nindex + 1] += weight[i]*quant_error[1] / weight_sum;
+                    img[4*nindex + 2] += weight[i]*quant_error[2] / weight_sum;
+                }
+            }
     }
 }

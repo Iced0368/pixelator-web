@@ -6,18 +6,21 @@ import ImageUploadBox from './components/ImageUploadBox.vue';
 import ArrowIcon from './assets/next-arrow.svg'
 import { CanvasWithImageData, InputAndSlider, Tab, TabItem } from './components/common';
 
-const inputImageData = ref<ImageData>(new ImageData(1, 1));
+const inputImageData = ref<ImageData | undefined>(undefined);
+const inputPalette = ref<ImageData | undefined>(undefined);
 
 const outputImageDatas = reactive({
-  output:       ref(new ImageData(1, 1)),
-  edge:         ref(new ImageData(1, 1)),
-  edgeness:  	ref(new ImageData(1, 1)),
+  output:       ref<ImageData | undefined>(undefined),
+  edge:         ref<ImageData | undefined>(undefined),
+  edgeness:  	ref<ImageData | undefined>(undefined),
+  palette: 		ref<ImageData | undefined>(undefined),
 });
 
 const maxSize = reactive({height: 0, width: 0});
 const outputSize = reactive({height: 0, width: 0});
 const preserveRatio = ref(true);
-const paletteSize = ref(64);
+const paletteSize = ref(32);
+const doDithering = ref(true);
 
 const threshold = ref(0.2);
 const sensitivity = ref(30);
@@ -38,6 +41,9 @@ const handleUpload = (readerResult: string) => {
 		inputImageData.value = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
 		(async function() {
+			if (inputImageData.value === undefined)
+				inputImageData.value = new ImageData(1, 1);
+
 			maxSize.height = inputImageData.value.height;
 			maxSize.width = inputImageData.value.width;
 
@@ -51,21 +57,43 @@ const handleUpload = (readerResult: string) => {
 	img.src = readerResult;
 }
 
+const handleUploadPalette = (readerResult: string) => {
+	const img = new Image();
+
+	img.onload = () => {
+		const canvas = document.createElement('canvas');
+		const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+
+		canvas.width = img.width;
+		canvas.height = img.height;
+		ctx.drawImage(img, 0, 0);
+
+		inputPalette.value = ctx.getImageData(0, 0, canvas.width, canvas.height);
+	}
+
+	img.src = readerResult;
+}
+
 const handleTransform = () => {
+	if (inputImageData.value === undefined) return;
+
 	console.time("total");
 	try {
 		const res = pixelateImageData(
 			inputImageData.value,
+			inputPalette.value,
 			outputSize.height, 
 			outputSize.width,
 			paletteSize.value,
 			threshold.value,
 			sensitivity.value,
+			doDithering.value,
 		);
 
 		outputImageDatas.output = res.output;
 		outputImageDatas.edge = res.edge;
 		outputImageDatas.edgeness = res.edgeness;
+		outputImageDatas.palette = res.palette;
 	}
 	finally {
 		console.timeEnd("total");
@@ -73,6 +101,7 @@ const handleTransform = () => {
 }
 
 const handleHeightChange = (event: Event) => {
+	if (inputImageData.value === undefined) return;
 	if (event.target && event.target instanceof HTMLInputElement) {
 		outputSize.height = Number(event.target.value);
 
@@ -84,6 +113,7 @@ const handleHeightChange = (event: Event) => {
 }
 
 const handleWidthChange = (event: Event) => {
+	if (inputImageData.value === undefined) return;
 	if (event.target && event.target instanceof HTMLInputElement) {
 		outputSize.width = Number(event.target.value);
 
@@ -118,41 +148,62 @@ const handleSensitiviyChange = (event: Event) => {
 	<div class="pixelator-container">
 		<div class="transformer-container">
 			<Tab>
-			<TabItem tabName="원본 이미지">
 				<div class="before-container">
-					<ImageUploadBox @uploadFile="handleUpload"/>
+					<TabItem tabName="원본 이미지">
+						<ImageUploadBox 
+							@uploadFile="handleUpload"
+							@cancel="inputImageData=undefined"
+						/>
+					</TabItem>
+					<TabItem tabName="팔레트">
+						<ImageUploadBox 
+							@uploadFile="handleUploadPalette"
+							@cancel="inputPalette=undefined"
+						/>
+					</TabItem>
 				</div>
-			</TabItem>
 			</Tab>
 
 			<ArrowIcon></ArrowIcon>
 
 			<Tab>
-			<div :class="['after-container', expanded ? 'expanded' : '']">
-				<TabItem tabName="output">
-				<CanvasWithImageData
-					:imageData="outputImageDatas.output"
-					@click="expanded = !expanded"
-				>
-				</CanvasWithImageData>
-				</TabItem>
+				<div :class="['after-container', expanded ? 'expanded' : '']">
+					<TabItem tabName="output">
+						<CanvasWithImageData
+							v-if="outputImageDatas.output"
+							:imageData="outputImageDatas.output"
+							@click="expanded = !expanded"
+						>
+						</CanvasWithImageData>
+					</TabItem>
 
-				<TabItem tabName="edge">
-				<CanvasWithImageData
-					:imageData="outputImageDatas.edge"
-					@click="expanded = !expanded"
-				>
-				</CanvasWithImageData>
-				</TabItem>
+					<TabItem tabName="edge">
+						<CanvasWithImageData
+							v-if="outputImageDatas.edge"
+							:imageData="outputImageDatas.edge"
+							@click="expanded = !expanded"
+						>
+						</CanvasWithImageData>
+					</TabItem>
 
-				<TabItem tabName="edge-resized">
-				<CanvasWithImageData
-					:imageData="outputImageDatas.edgeness"
-					@click="expanded = !expanded"
-				>
-				</CanvasWithImageData>
-				</TabItem>
-			</div>
+					<TabItem tabName="edge-resized">
+						<CanvasWithImageData
+							v-if="outputImageDatas.edgeness"
+							:imageData="outputImageDatas.edgeness"
+							@click="expanded = !expanded"
+						>
+						</CanvasWithImageData>
+					</TabItem>
+
+					<TabItem tabName="palette">
+						<CanvasWithImageData
+							v-if="outputImageDatas.palette"
+							:imageData="outputImageDatas.palette"
+							@click="expanded = !expanded"
+						>
+						</CanvasWithImageData>
+					</TabItem>
+				</div>
 			</Tab>
 		</div>
 
@@ -176,6 +227,7 @@ const handleSensitiviyChange = (event: Event) => {
 					너비(px)
 				</InputAndSlider>
 				<InputAndSlider 
+					v-if="inputPalette===undefined"
 					:value="paletteSize"
 					:min="0"
 					:max="128"
@@ -185,8 +237,14 @@ const handleSensitiviyChange = (event: Event) => {
 				</InputAndSlider>
 
 				<div class="checkbox-container">
-					<label for="preserve-ratio">비율 유지</label>
-					<input type="checkbox" id="preserve-ratio" v-model="preserveRatio">
+					<div>
+						<label for="dithering">디더링</label>
+						<input type="checkbox" id="dithering" v-model="doDithering">
+					</div>
+					<div>
+						<label for="preserve-ratio">비율 유지</label>
+						<input type="checkbox" id="preserve-ratio" v-model="preserveRatio">
+					</div>
 				</div>
 			</div>
 
@@ -222,95 +280,110 @@ const handleSensitiviyChange = (event: Event) => {
 <style scoped>
 
 .pixelator-container {
-  border: 1px solid lightgray;
-  border-radius: 10px;
-  padding: 20px;
+	border: 1px solid lightgray;
+	border-radius: 10px;
+	padding: 20px;
 }
 
 .transformer-container {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+	display: flex;
+	align-items: center;
+	gap: 10px;
 
-  svg {
-    width: 100px;
-    height: 100px;
-    fill: lightgray;
-  }
+	svg {
+		width: 100px;
+		height: 100px;
+		fill: lightgray;
+	}
 }
 
 .before-container {
-  width: 350px;
-  height: 350px;
+	width: 500px;
+	height: 500px;
 }
 
 .after-container {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 
-  width: 350px;
-  height: 350px;
-  padding: 10px;
-  margin: 0;
-  border: 2px dashed lightgray;
-  border-radius: 10px;
+	width: 500px;
+	height: 500px;
+	padding: 10px;
+	margin: 0;
+	border: 2px dashed lightgray;
+	border-radius: 10px;
 
-  canvas {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    image-rendering: pixelated;
+	canvas {
+		width: 100%;
+		height: 100%;
+		object-fit: contain;
+		image-rendering: pixelated;
 
-    margin: 0 auto;
-  }
+		margin: 0 auto;
+	}
+}
+
+.palette-container {
+	height: 100%;
+	width: 100%;
+
+	canvas {
+		width: 100%;
+		height: 100%;
+		object-fit: contain;
+		image-rendering: pixelated;
+
+		margin: 0 auto;
+	}
 }
 
 .after-container.expanded {
-  position: fixed;
-  left: 0;
-  top: 0;
+	position: fixed;
+	left: 0;
+	top: 0;
 
-  width: 100vw;
-  height: 100vh;
-  padding: 0;
-  border: none;
-  border-radius: 0;
+	width: 100vw;
+	height: 100vh;
+	padding: 0;
+	border: none;
+	border-radius: 0;
 
-  background-color: black;
+	background-color: black;
 }
 
 .input-container {
-  display: flex;
+	display: flex;
 
-  border: 1px solid lightgray;
-  border-radius: 10px;
+	border: 1px solid lightgray;
+	border-radius: 10px;
 
-  padding: 20px;
-  margin-top: 20px;
+	padding: 20px;
+	margin-top: 20px;
 
-  gap: 20px;
+	gap: 20px;
 }
 
 .input-sector {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
 
-  span {
-    font-size: 1.1rem;
-    font-weight: 600;
-  }
+	span {
+		font-size: 1.1rem;
+		font-weight: 600;
+	}
 }
 
 .checkbox-container {
-  display: flex;
-  justify-content: end;
+	display: flex;
+	justify-content: end;
+	gap: 10px;
 }
 
 .vertical-divider {
-  border: 1px dashed lightgray;
+	border: 1px dashed lightgray;
 }
 
 </style>

@@ -9,5 +9,5 @@ emcc transform.cpp ^
     -s SINGLE_FILE=1 ^
     -O3 -msimd128 ^
     -s DISABLE_EXCEPTION_CATCHING=1 ^
-    -s EXPORTED_FUNCTIONS="[\"_malloc\", \"_free\", \"_medianResize\" , \"_convertGrayToRGBA\", \"_emphasizeEdge\", \"_kdMeansQuantization\"]" ^
+    -s EXPORTED_FUNCTIONS="[\"_malloc\", \"_free\", \"_medianResize\" , \"_convertGrayToRGBA\", \"_emphasizeEdge\", \"_kdMeansQuantization\", \"_dithering\"]" ^
     -s EXPORTED_RUNTIME_METHODS="[\"cwrap\", \"ccall\"]"
