@@ -65,7 +65,7 @@ extern "C" {
                         for (int cx = cx_start; cx < cx_end; cx++)
                             channel_value[ci++] = src[4 * (cy * width + cx) + channel];
 
-                    std::sort(channel_value, channel_value + cell_size);
+                    std::nth_element(channel_value, channel_value + cell_size / 2, channel_value + cell_size);
                     dst[4*idx + channel] = channel_value[cell_size / 2];
                 }
                 delete[] channel_value;

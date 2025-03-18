@@ -1,6 +1,8 @@
+//@ts-ignore
 import TransformModule from '../assembly/build/transform.js'
 
-const Module: WebAssembly.Module & {
+type TransformModule = WebAssembly.Module & {
+    HEAPU8: any,
     _malloc: (length: number) => number,
     _free: (length: number) => void,
     _medianResize: (
@@ -27,8 +29,10 @@ const Module: WebAssembly.Module & {
         height: number, width: number, 
         palette: number, palette_size: number,
     ) => void
-}
-= await TransformModule();
+};
+
+let Module: TransformModule;
+TransformModule().then((res: TransformModule) => Module = res);
 
 export class CArray { 
     ptr: number;
