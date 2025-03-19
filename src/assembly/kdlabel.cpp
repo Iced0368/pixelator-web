@@ -53,13 +53,20 @@ int KDSort(uint8_t* base, uint8_t** start, uint8_t** end, int depth, int* labels
         for (uint8_t** p = start; p < end; p++)
             labels[(*p - base) / 4] = label;
 
-        for (int channel = 0; channel < VALID_CHANNELS; channel++)
-            rep[VALID_CHANNELS * label + channel] = (*(start + (end - start) / 2))[channel];
+        int sum = 0;
+
+        for (int channel = 0; channel < VALID_CHANNELS; channel++) {
+            int sum = 0;
+            for (uint8_t** p = start; p < end; p++)
+                sum += (*p)[channel];
+            rep[VALID_CHANNELS * label + channel] = sum / (end - start);
+        }
 
         return ++label;
     }
 
     int channel  = depth % VALID_CHANNELS;
+
     uint8_t threshold = findOtsuThreshold(start, end, channel);
 
     uint8_t** mid = (uint8_t**)std::partition((uint32_t**)start, (uint32_t**)end, 

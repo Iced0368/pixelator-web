@@ -91,8 +91,6 @@ extern "C" {
                 int cell_size = cell_height * cell_width;
                 int idx = y * new_width + x;
 
-                uint8_t* rgbs = new uint8_t[3 * cell_size];
-
                 int ci = 0;
                 int edge_cnt = 0;
                 for (int cy = cy_start; cy < cy_end; cy++)
@@ -101,29 +99,16 @@ extern "C" {
 
                         if (edge[s_idx]) 
                             edge_cnt++;
-
-                        rgbs[3 * ci] = src[4*s_idx];
-                        rgbs[3 * ci + 1] = src[4*s_idx + 1];
-                        rgbs[3 * ci + 2] = src[4*s_idx + 2];
                         ci++;
                     }
 
                 edgeness[idx] = 255 * edge_cnt / cell_size;
 
-                float t = std::powf((float)edge_cnt / cell_size, 100.f / sensitivity - 1);
+                float t = std::powf((float)edgeness[idx] / 255, 100.f / sensitivity - 1);
 
-                uint8_t edge_rgb[3] = { 
-                    (uint8_t)((1.f - t)*img[4*idx]),
-                    (uint8_t)((1.f - t)*img[4*idx + 1]),
-                    (uint8_t)((1.f - t)*img[4*idx + 2])
-                };
-
-                int closest_idx = find_closest(edge_rgb, rgbs, cell_size);
-                dst[4*idx]     = rgbs[3*closest_idx];
-                dst[4*idx + 1] = rgbs[3*closest_idx + 1];
-                dst[4*idx + 2] = rgbs[3*closest_idx + 2];
-
-                delete[] rgbs;
+                dst[4*idx]     = (uint8_t)((1.f - t)*img[4*idx]);
+                dst[4*idx + 1] = (uint8_t)((1.f - t)*img[4*idx + 1]);
+                dst[4*idx + 2] = (uint8_t)((1.f - t)*img[4*idx + 2]);
             }
     }
 
@@ -172,6 +157,7 @@ extern "C" {
 
         int label_size = KDLabel(src, size, KD_DEPTH, labels, quantized);
         printf("label_size= %d\n", label_size);
+        
 
         float* centroids = new float[3 * palette_size];
         int** clusters = new int*[palette_size];
@@ -236,10 +222,13 @@ extern "C" {
         printf("k-means iteration= %d\n", cnt);
 
         for (int i = 0; i < size; i++) {
-            dst[4 * i]     = centroids[3 * label_cluster[labels[i]]];
-            dst[4 * i + 1] = centroids[3 * label_cluster[labels[i]] + 1];
-            dst[4 * i + 2] = centroids[3 * label_cluster[labels[i]] + 2];
+            int closest_index = find_closest(&src[4*i], centroids, palette_size);
+
+            dst[4 * i]     = centroids[3 * closest_index];
+            dst[4 * i + 1] = centroids[3 * closest_index + 1];
+            dst[4 * i + 2] = centroids[3 * closest_index + 2];
             dst[4 * i + 3] = src[4 * i + 3];
+
         }
 
         if (palette != nullptr) {
@@ -287,11 +276,6 @@ extern "C" {
         int* img = new int[4 * size];
         for (int i = 0; i < 4 * size; i++)
             img[i] = src[i];
-
-        //memcpy(dst, src, sizeof(uint8_t) * size * 4);
-
-        for(int i = 0; i < palette_size; i++)
-            printf("%d: %d %d %d\n", i, palette[4*i], palette[4*i+1], palette[4*i+2]);
 
         printf("%d\n", palette_size);
 
