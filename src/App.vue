@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, reactive, ref } from 'vue';
-import { pixelateImageData } from './utils/transform';
+import { pixelateImageData } from './utils/pixelate';
 
 import ImageUploadBox from './components/ImageUploadBox.vue';
 import ArrowIcon from './assets/next-arrow.svg'
@@ -20,7 +20,7 @@ const maxSize = reactive({height: 0, width: 0});
 const outputSize = reactive({height: 0, width: 0});
 const preserveRatio = ref(true);
 const paletteSize = ref(32);
-const doDithering = ref(true);
+const doDithering = ref(false);
 
 const threshold = ref(0.2);
 const sensitivity = ref(30);

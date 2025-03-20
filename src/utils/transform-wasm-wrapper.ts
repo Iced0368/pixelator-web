@@ -1,38 +1,65 @@
-//@ts-ignore
-import TransformModule from '../assembly/build/transform.js'
+import Module from '../assembly/build/transform.js'
 
-type TransformModule = WebAssembly.Module & {
-    HEAPU8: any,
-    _malloc: (length: number) => number,
-    _free: (length: number) => void,
-    _medianResize: (
+function EnsureModuleInitialized(target: any, propertyKey: string) {
+    target[propertyKey] = function(...args: any[]) {
+        if (this._module === undefined) {
+            throw new Error(`${propertyKey} cannot be called because _module is not initialized.`);
+        }
+        return this._module[propertyKey](...args);
+    };
+}
+
+class TransformModule {
+    static _module: any = undefined;
+
+    @EnsureModuleInitialized
+    static get HEAPU8() { return this._module.HEAPU8; };
+    static set HEAPU8(_: any) {};
+
+    @EnsureModuleInitialized 
+    static _free: (length: number) => void;
+
+    @EnsureModuleInitialized 
+    static _malloc: (length: number) => number;
+
+    @EnsureModuleInitialized 
+    static _medianResize: (
         srcPtr: number, dstPtr: number, 
         height: number, width: number,
         newHeight: number, newWidth: number, 
-    ) => void,
-    _convertGrayToRGBA: (srcPtr: number, dstPtr: number, length: number) => void,
-    _emphasizeEdge: (
+    ) => void;
+
+    @EnsureModuleInitialized 
+    static _convertGrayToRGBA: (srcPtr: number, dstPtr: number, length: number) => void;
+
+    @EnsureModuleInitialized 
+    static _emphasizeEdge: (
         srcPtr: number, dstPtr: number, imgPtr: number, 
         edgePtr: number, edgenessPtr: number,
         height: number, width: number,
         newHeight: number, newWidth: number, 
         sensitivity: number
-    ) => void,
-    _kdMeansQuantization: (
+    ) => void;
+
+    @EnsureModuleInitialized 
+    static _kdMeansQuantization: (
         src: number, dst: number,
         height: number, width: number, 
         palette: number, k: number,
         mode: number,
-    ) => void,
-    _dithering: (
+    ) => void;
+
+    @EnsureModuleInitialized 
+    static _dithering: (
         src: number, dst: number,
         height: number, width: number, 
         palette: number, palette_size: number,
     ) => void
 };
 
-let Module: TransformModule;
-TransformModule().then((res: TransformModule) => Module = res);
+Module().then((module: any) => {
+    TransformModule._module = module;
+});
 
 export class CArray { 
     ptr: number;
@@ -44,26 +71,25 @@ export class CArray {
             this.length = 0;
         }
         else if (typeof arg === 'number') {
-            this.ptr = Module._malloc(arg);
+            this.ptr = TransformModule._malloc(arg);
             this.length = arg;
         }
         else {
-            const ptr = Module._malloc(arg.length);
-            Module.HEAPU8.set(arg, ptr);
+            const ptr = TransformModule._malloc(arg.length);
+            TransformModule.HEAPU8.set(arg, ptr);
             this.ptr = ptr;
             this.length = arg.length;
         }
     }
-
 };
 
 export function free(cArray: CArray) {
-    Module._free(cArray.ptr);
+    TransformModule._free(cArray.ptr);
 }
 
 export function convertCArrayToArray(cArray: CArray) {
     const array = new Uint8ClampedArray(cArray.length);
-    array.set(Module.HEAPU8.subarray(cArray.ptr, cArray.ptr + cArray.length));
+    array.set(TransformModule.HEAPU8.subarray(cArray.ptr, cArray.ptr + cArray.length));
     return array;
 }
 
@@ -74,7 +100,7 @@ export function medianResize
     newHeight: number, newWidth: number, 
 ) 
 {
-    Module._medianResize(
+    TransformModule._medianResize(
         src.ptr, dst.ptr,
         height, width,
         newHeight, newWidth, 
@@ -84,7 +110,7 @@ export function medianResize
 export function convertGrayToRGBA(
     src: CArray, dst: CArray
 ) {
-    Module._convertGrayToRGBA(src.ptr, dst.ptr, src.length);
+    TransformModule._convertGrayToRGBA(src.ptr, dst.ptr, src.length);
 }
 
 export function emphasizeEdge(
@@ -94,7 +120,7 @@ export function emphasizeEdge(
     newHeight: number, newWidth: number, 
     sensitivity: number
 ) {
-    Module._emphasizeEdge(
+    TransformModule._emphasizeEdge(
         src.ptr, dst.ptr, img.ptr, edge.ptr, edgeness.ptr,
         height, width, newHeight, newWidth, 
         sensitivity
@@ -107,7 +133,7 @@ export function kdMeansQuantization(
     palette: CArray, palette_size: number,
     mode: number,
 ) {
-    Module._kdMeansQuantization(
+    TransformModule._kdMeansQuantization(
         src.ptr, dst.ptr, 
         height, width, 
         palette.ptr, palette_size,
@@ -120,7 +146,7 @@ export function dithering(
     height: number, width: number,
     palette: CArray, palette_size: number,
 ) {
-    Module._dithering(
+    TransformModule._dithering(
         src.ptr, dst.ptr,
         height, width, 
         palette.ptr, palette_size

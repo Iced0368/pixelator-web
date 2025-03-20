@@ -8,21 +8,14 @@ const imageSrc = ref("");
 
 const emit = defineEmits();
 
-const handleDragOver = (event: Event) => {
-    event.preventDefault();
-}
-
 const handleUploadFromDrop = (event: DragEvent) => {
     event.preventDefault();
     isDragging.value = false;
 
     if (event.dataTransfer) {
         const file = event.dataTransfer.files[0];
-
-        if (file.type.startsWith("image")) {
-            readImageAsData(file);
-            uploadedFile.value = file;
-        }
+        readImageAsData(file);
+        uploadedFile.value = file;
     }
 }
 
@@ -34,11 +27,8 @@ const handleUploadFromInput = (event: Event) => {
         const target = event.target as HTMLInputElement;
         if (target.files) {
             const file = target.files[0];
-
-            if (file.type.startsWith("image")) {
-                readImageAsData(file);
-                uploadedFile.value = file;
-            }
+            readImageAsData(file);
+            uploadedFile.value = file;
         }
     }
 }
@@ -65,11 +55,12 @@ const handleCancel = () => {
             :class="isDragging ? 'file-hover' : ''"
             @dragenter="isDragging=true"
             @dragleave="isDragging=false"
-            @dragover="handleDragOver"
+            @dragover="(event: Event) => event.preventDefault()"
             @drop="handleUploadFromDrop"
         >
             <input type="file"
                 @change="handleUploadFromInput"
+                acccept="image/*"
             >
         </label>
 

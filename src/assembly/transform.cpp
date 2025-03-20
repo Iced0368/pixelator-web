@@ -1,8 +1,10 @@
+#include <emscripten.h>
 #include <stdint.h>
 #include <string.h>
 #include <algorithm>
 #include <iostream>
 #include <limits>
+#include <stdlib.h>
 
 #include "kdlabel.cpp"
 
@@ -32,6 +34,7 @@ int find_closest(T* target, U* palette, int palette_size, int palette_stride=3) 
 }
 
 extern "C" {
+    EMSCRIPTEN_KEEPALIVE
     void convertGrayToRGBA(uint8_t* src, uint8_t* dst, int length) {
         for (int i = 0; i < length; i++) {
             dst[4 * i] = src[i];
@@ -41,6 +44,7 @@ extern "C" {
         }
     }
 
+    EMSCRIPTEN_KEEPALIVE
     void medianResize(
         uint8_t* src, uint8_t* dst,
         int height, int width,
@@ -72,6 +76,7 @@ extern "C" {
             }
     }
 
+    EMSCRIPTEN_KEEPALIVE
     void emphasizeEdge(
         uint8_t* src, uint8_t* dst, uint8_t* img,
         uint8_t* edge, uint8_t* edgeness,
@@ -164,7 +169,6 @@ extern "C" {
 
         int* cluster_length = new int[palette_size];
         int* cluster_size = new int[palette_size];
-        int* label_cluster = new int[label_size];
 
         for (int i = 0; i < palette_size; i++) {
             int index = i * label_size / palette_size;
@@ -192,8 +196,6 @@ extern "C" {
 
                 clusters[closest_cluster][cluster_length[closest_cluster]++] = i;
                 cluster_size[closest_cluster] += hist[i];
-
-                label_cluster[i] = closest_cluster;
             }
 
             uint8_t* channel_value = new uint8_t[palette_size];
@@ -247,12 +249,12 @@ extern "C" {
 
         delete[] cluster_length;
         delete[] cluster_size;
-        delete[] label_cluster;
         for(int i = 0; i < palette_size; i++)
             delete[] clusters[i];
         delete[] clusters;
     }
 
+    EMSCRIPTEN_KEEPALIVE
     void kdMeansQuantization(
         uint8_t* src, uint8_t* dst, 
         int height, int width, 
@@ -267,6 +269,7 @@ extern "C" {
         }
     };
 
+    EMSCRIPTEN_KEEPALIVE
     void dithering(
         uint8_t* src, uint8_t* dst,
         int height, int width,

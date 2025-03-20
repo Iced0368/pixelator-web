@@ -28,9 +28,7 @@ watch(() => props.imageData, newVal => updateImageData(newVal));
 </template>
 
 <style scoped>
-
 canvas:hover {
     cursor: pointer;
 }
-
 </style>

@@ -1,5 +1,5 @@
 import cv from 'opencv-ts';
-import { convertGrayToRGBA, convertCArrayToArray, emphasizeEdge, free, medianResize, CArray, kdMeansQuantization, dithering } from './wasm-wrapper';
+import { convertGrayToRGBA, convertCArrayToArray, emphasizeEdge, free, medianResize, CArray, kdMeansQuantization, dithering } from './transform-wasm-wrapper';
 
 export function pixelateImageData(
     imageData: ImageData,
