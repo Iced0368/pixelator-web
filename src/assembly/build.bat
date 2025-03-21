@@ -9,4 +9,4 @@ emcc transform.cpp ^
     -s ALLOW_MEMORY_GROWTH=1 ^
     -s SINGLE_FILE=1 ^
     -s DISABLE_EXCEPTION_CATCHING=1 ^
-    -s EXPORTED_FUNCTIONS="[\"cwrap\", \"_malloc\", \"_free\"]"
+    -s EXPORTED_FUNCTIONS="[\"_malloc\", \"_free\"]"

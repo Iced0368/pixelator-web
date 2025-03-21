@@ -14,7 +14,7 @@ class TransformModule {
 
     @EnsureModuleInitialized
     static get HEAPU8() { return this._module.HEAPU8; };
-    static set HEAPU8(_: any) {};
+    static set HEAPU8(_) {};
 
     @EnsureModuleInitialized 
     static _free: (length: number) => void;
