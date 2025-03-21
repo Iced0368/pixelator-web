@@ -164,7 +164,10 @@ const handleSensitiviyChange = (event: Event) => {
 				</div>
 			</Tab>
 
-			<ArrowIcon></ArrowIcon>
+			<div class="pixelation-container">
+				<ArrowIcon></ArrowIcon>
+				<button @click="handleTransform">픽셀화</button>
+			</div>
 
 			<Tab>
 				<div :class="['after-container', expanded ? 'expanded' : '']">
@@ -273,7 +276,6 @@ const handleSensitiviyChange = (event: Event) => {
 				</InputAndSlider>
 			</div>
 		</div>
-		<button @click="handleTransform">픽셀화</button>
 	</div>
 </template>
 
@@ -321,6 +323,18 @@ const handleSensitiviyChange = (event: Event) => {
 		image-rendering: pixelated;
 
 		margin: 0 auto;
+	}
+}
+
+.pixelation-container {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+
+	button {
+		background-color: lightgray;
+		color: white;
 	}
 }
 
