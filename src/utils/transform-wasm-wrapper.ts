@@ -1,3 +1,4 @@
+//@ts-ignore
 import Module from '../assembly/build/transform.js'
 
 function EnsureModuleInitialized(target: any, propertyKey: string) {

@@ -12,9 +12,6 @@
 
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
-
-    "allowJs": true,
-    "checkJs": true,
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"]
 }
