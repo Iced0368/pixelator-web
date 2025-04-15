@@ -6,6 +6,8 @@ const isDragging = ref(false);
 const uploadedFile = ref<File>();
 const imageSrc = ref("");
 
+const inputRef = ref<HTMLInputElement>();
+
 const emit = defineEmits();
 
 const handleUploadFromDrop = (event: DragEvent) => {
@@ -44,6 +46,9 @@ const readImageAsData = (file: File) => {
 
 const handleCancel = () => {
     uploadedFile.value = undefined;
+    if (inputRef.value) {
+        inputRef.value.value = "";
+    }
     emit("cancel");
 }
 
@@ -59,6 +64,7 @@ const handleCancel = () => {
             @drop="handleUploadFromDrop"
         >
             <input type="file"
+                ref="inputRef"
                 @change="handleUploadFromInput"
                 acccept="image/*"
             >
