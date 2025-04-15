@@ -5,11 +5,13 @@
 #include <iostream>
 #include <limits>
 #include <stdlib.h>
+#include <unordered_map>
 
 #include "kdlabel.cpp"
+#include "color_transform.cpp"
 
 template <typename T, typename U>
-float rgb_distance(T* a, U* b) {
+float euclidean_distance(T* a, U* b) {
     float d[3]; 
     d[0] = (float)a[0] - b[0];
     d[1] = (float)a[1] - b[1];
@@ -19,12 +21,22 @@ float rgb_distance(T* a, U* b) {
 }
 
 template <typename T, typename U>
+float xy_distance(T x1, T y1, U x2, U y2) {
+    int d[2]; 
+    d[0] = (float)x1 - x2;
+    d[1] = (float)y1 - y2;
+
+    return std::max(std::abs(d[0]), std::abs(d[1]));
+    //return std::sqrt(d[0]*d[0] +  d[1]*d[1]);
+}
+
+template <typename T, typename U>
 int find_closest(T* target, U* palette, int palette_size, int palette_stride=3) {
     float min_dist = std::numeric_limits<float>::max();
     int res = 0;
 
     for (int i = 0; i < palette_size; i++) {
-        float dist = rgb_distance(target, &palette[palette_stride*i]);
+        float dist = euclidean_distance(target, &palette[palette_stride*i]);
         if (min_dist > dist) {
             min_dist = dist;
             res = i;
@@ -208,7 +220,7 @@ extern "C" {
 
                     new_centroid[channel] = value;
                 }
-                float dist = rgb_distance(&centroids[3 * c_idx], new_centroid);
+                float dist = euclidean_distance(&centroids[3 * c_idx], new_centroid);
 
                 centroids[3 * c_idx] = new_centroid[0];
                 centroids[3 * c_idx + 1] = new_centroid[1];
@@ -319,5 +331,309 @@ extern "C" {
                     img[4*nindex + 2] += weight[i]*quant_error[2] / weight_sum;
                 }
             }
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    void removeBorder(
+        uint8_t* src, uint8_t* dst,
+        int height, int width
+    ) {
+        int stride = std::ceil(std::sqrt(height * width) / 256);
+
+        for(int y = 0; y < height; y++)
+            for(int x = 0; x < width; x++) {
+                int cy_start = std::max(0, y - stride);
+                int cy_end = std::min(height, y + stride);
+                int cx_start = std::max(0, x - stride);
+                int cx_end = std::min(width, x + stride);
+
+                int cell_height = cy_end - cy_start;
+                int cell_width  = cx_end - cx_start;
+                int cell_size = cell_height * cell_width;
+                int idx = y * width + x;
+
+                uint8_t* channel_value = new uint8_t[cell_size];
+                for (int channel = 0; channel < 4; channel++) {
+                    int ci = 0;
+                    for (int cy = cy_start; cy < cy_end; cy++)
+                        for (int cx = cx_start; cx < cx_end; cx++)
+                            channel_value[ci++] = src[4 * (cy * width + cx) + channel];
+
+                    std::nth_element(channel_value, channel_value + cell_size / 2, channel_value + cell_size);
+                    dst[4*idx + channel] = channel_value[cell_size / 2];
+                }
+                delete[] channel_value;
+            }
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    void superPixel(
+        uint8_t* src, uint8_t* dst,
+        int height, int width,
+        int new_height, int new_width
+    ) {
+        int N = new_height * new_width;
+        int M = height * width;
+
+        float m = 45;
+        float dp_weight = m * std::sqrt((float)N / M);
+
+        float* lab_data = new float[3 * M];
+        rgba_to_lab(src, lab_data, M);
+
+        int* labels = new int[M];
+        float* centroids = new float[5 * N];
+        int* cluster_size = new int[N];
+
+        for(int y = 0; y < new_height; y++)
+            for(int x = 0; x < new_width; x++) {
+                int idx = y * new_width + x;
+                int cy = (y + 0.5f) * height / new_height;
+                int cx = (x + 0.5f) * width / new_width;
+
+                int cidx = cy * width + cx;
+
+                centroids[5*idx] = lab_data[3*cidx];
+                centroids[5*idx + 1] = lab_data[3*cidx + 1];
+                centroids[5*idx + 2] = lab_data[3*cidx + 2];
+                centroids[5*idx + 3] = cx;
+                centroids[5*idx + 4] = cy;
+            }
+
+        int cnt = 0;
+        int updated = M;
+        while (updated > (M + 999) / 1000 && cnt++ < 30) {
+            printf("%d / %d\n", updated, M);
+            updated = 0;
+            memset(cluster_size, 0, sizeof(int) * N);
+
+            for(int cy = 0; cy < height; cy++)
+                for(int cx = 0; cx < width; cx++) {
+                    int idx = cy * width + cx;
+                    int y = cy * new_height / height;
+                    int x = cx * new_width / width;
+
+                    int closest_cluster = 0;
+                    float min_dist = std::numeric_limits<float>::max();
+                    for (int dx = -1; dx <= 1; dx++)
+                        for (int dy = -1; dy <= 1; dy++) {
+                            int ny = y + dy;
+                            int nx = x + dx;
+
+                            if (ny < 0 || ny >= new_height || nx < 0 || nx >= new_width)
+                                continue;
+
+                            int c_idx = ny * new_width + nx;
+                            
+                            float dc = euclidean_distance(&centroids[5*c_idx], &lab_data[3*idx]);
+                            float dp = xy_distance(centroids[5*c_idx + 3], centroids[5*c_idx + 4], cx, cy);
+                            
+                            float dist = dc + dp_weight * dp;
+
+                            if (min_dist > dist) {
+                                min_dist = dist;
+                                closest_cluster = c_idx;
+                            }
+                        }
+
+                    if (labels[idx] != closest_cluster)
+                        updated++;
+                    labels[idx] = closest_cluster;
+                    cluster_size[closest_cluster]++;
+                }
+
+            for (int i = 0; i < N; i++) {
+                if (cluster_size[i] > 0) {
+                    centroids[5*i] = 0;
+                    centroids[5*i + 1] = 0;
+                    centroids[5*i + 2] = 0;
+                    centroids[5*i + 3] = 0;
+                    centroids[5*i + 4] = 0;
+                }
+            }
+
+            for (int i = 0; i < M; i++) {
+                int c_idx = labels[i];
+                centroids[5*c_idx] += lab_data[3*i];
+                centroids[5*c_idx + 1] += lab_data[3*i + 1];
+                centroids[5*c_idx + 2] += lab_data[3*i + 2];
+                centroids[5*c_idx + 3] += i % width;
+                centroids[5*c_idx + 4] += i / width;
+            }
+
+            int disabled_cnt = 0;
+
+            for (int i = 0; i < N; i++) {
+                if (cluster_size[i] > 0) {
+                    centroids[5*i] /= cluster_size[i];
+                    centroids[5*i + 1] /= cluster_size[i];
+                    centroids[5*i + 2] /= cluster_size[i];
+                    centroids[5*i + 3] /= cluster_size[i];
+                    centroids[5*i + 4] /= cluster_size[i];
+                }
+            }
+        }
+        printf("superpixel clustering iteration= %d\n", cnt);
+
+        for(int y = 0; y < new_height; y++)
+            for(int x = 0; x < new_width; x++) {
+                int idx = y * new_width + x;
+                int cy = (y + 0.5f) * height / new_height;
+                int cx = (x + 0.5f) * width / new_width;
+
+                int cidx = cy * width + cx;
+
+                lab_to_rgba(&centroids[5*idx], &dst[4*idx], 1);
+                dst[4*idx + 3] = src[4*cidx + 3];
+            }
+
+        delete[] lab_data;
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    void __superPixel(
+        uint8_t* src, uint8_t* dst,
+        int height, int width,
+        int new_height, int new_width
+    ) {
+        int N = new_height * new_width;
+        int M = height * width;
+
+        float m = 10;
+        float DP_WEIGHT = m * std::sqrt((float)N / M);
+        float dp_weight = 0;
+
+        int palette_size = 4;
+        int k = 1;
+
+        int* labels = new int[M];
+        float* centroids = new float[5 * N];
+        int* cluster_size = new int[N];
+
+        centroids[0] = 0; centroids[1] = 0; centroids[2] = 0;
+
+        while (k <= palette_size) {
+            int cnt = 0;
+            int updated = M;
+            dp_weight = 0;
+            while (updated > (M + 999) / 1000 && cnt++ < 30) {
+                printf("%d / %d\n", updated, M);
+                updated = 0;
+                memset(cluster_size, 0, sizeof(int) * k);
+
+                for(int cy = 0; cy < height; cy++)
+                    for(int cx = 0; cx < width; cx++) {
+                        int idx = cy * width + cx;
+                        int y = cy * new_height / height;
+                        int x = cx * new_width / width;
+
+                        int closest_cluster = 0;
+                        float min_dist = std::numeric_limits<float>::max();
+                        for (int c_idx = 0; c_idx < N; c_idx++) {
+                            float dc = euclidean_distance(&centroids[5*c_idx], &src[4*idx]);
+                            float dp = xy_distance(centroids[5*c_idx + 3], centroids[5*c_idx + 4], cx, cy);
+                            
+                            float dist = dc + dp_weight * dp;
+
+                            if (min_dist > dist) {
+                                min_dist = dist;
+                                closest_cluster = c_idx;
+                            }
+                        }
+
+                        if (labels[idx] != closest_cluster)
+                            updated++;
+                        labels[idx] = closest_cluster;
+                        cluster_size[closest_cluster]++;
+                    }
+
+                for (int i = 0; i < N; i++) {
+                    if (cluster_size[i] > 0) {
+                        centroids[5*i] = 0;
+                        centroids[5*i + 1] = 0;
+                        centroids[5*i + 2] = 0;
+                        centroids[5*i + 3] = 0;
+                        centroids[5*i + 4] = 0;
+                    }
+                }
+
+                for (int i = 0; i < M; i++) {
+                    int c_idx = labels[i];
+                    centroids[5*c_idx] += src[4*i];
+                    centroids[5*c_idx + 1] += src[4*i + 1];
+                    centroids[5*c_idx + 2] += src[4*i + 2];
+                    centroids[5*c_idx + 3] += i % width;
+                    centroids[5*c_idx + 4] += i / width;
+                }
+
+                for (int i = 0; i < N; i++) {
+                    if (cluster_size[i] > 0) {
+                        centroids[5*i] /= cluster_size[i];
+                        centroids[5*i + 1] /= cluster_size[i];
+                        centroids[5*i + 2] /= cluster_size[i];
+                        centroids[5*i + 3] /= cluster_size[i];
+                        centroids[5*i + 4] /= cluster_size[i];
+                    }
+                }
+
+                //dp_weight = DP_WEIGHT;
+            }
+
+            for(int i = 0; i < k; i++)
+                printf("%f %f %f %f %f\n", 
+                    centroids[5*i],
+                    centroids[5*i + 1],
+                    centroids[5*i + 2],
+                    centroids[5*i + 3],
+                    centroids[5*i + 4]
+                );
+
+            printf("superpixel clustering iteration= %d\n", cnt);
+
+            centroids[5*k] = 255; centroids[5*k + 1] = 255; centroids[5*k + 2] = 255;
+            k++;
+        }
+        
+        for (int i = 0; i < M; i++) {
+            int c_idx = labels[i];
+
+            dst[4*i] = centroids[5*c_idx];
+            dst[4*i + 1] = centroids[5*c_idx + 1];
+            dst[4*i + 2] = centroids[5*c_idx + 2];
+            dst[4*i + 3] = 255;
+        }
+        return;
+        
+        
+        for(int y = 0; y < new_height; y++)
+            for(int x = 0; x < new_width; x++) {
+                int cy_start = y * height / new_height;
+                int cx_start = x * width / new_width;
+                int cy_end = (y + 1) * height / new_height;
+                int cx_end = (x + 1) * width / new_width;
+
+                int idx = y * new_width + x;
+
+                std::unordered_map<int, int> freq_map;
+                int max_label = 0, max_count = 0;
+
+                for (int cy = cy_start; cy < cy_end; cy++) {
+                    for (int cx = cx_start; cx < cx_end; cx++) {
+                        int label = labels[cy * width + cx];  
+                        freq_map[label]++;
+
+                        if (freq_map[label] > max_count) { 
+                            max_count = freq_map[label];
+                            max_label = label;
+                        }
+                    }
+                }
+
+                dst[4*idx] = centroids[5*max_label];
+                dst[4*idx + 1] = centroids[5*max_label + 1];
+                dst[4*idx + 2] = centroids[5*max_label + 2];
+                dst[4*idx + 3] = 255;
+            }
+        
     }
 }

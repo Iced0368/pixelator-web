@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, reactive, ref } from 'vue';
-import { pixelateImageData } from './utils/pixelate';
+import { pixelateImageData, pixelateImageDataHeavy } from './utils/pixelate';
 
 import ImageUploadBox from './components/ImageUploadBox.vue';
 import ArrowIcon from './assets/next-arrow.svg'
@@ -18,7 +18,6 @@ const outputImageDatas = reactive({
 
 const maxSize = reactive({height: 0, width: 0});
 const outputSize = reactive({height: 0, width: 0});
-const preserveRatio = ref(true);
 const paletteSize = ref(32);
 const doDithering = ref(false);
 
@@ -26,6 +25,32 @@ const threshold = ref(0.2);
 const sensitivity = ref(30);
 
 const expanded = ref(false);
+
+const handleTest = () => {
+	if (inputImageData.value === undefined) return;
+
+	console.time("total");
+	try {
+		const res = pixelateImageDataHeavy(
+			inputImageData.value,
+			inputPalette.value,
+			outputSize.height, 
+			outputSize.width,
+			paletteSize.value,
+			threshold.value,
+			sensitivity.value,
+			doDithering.value,
+		);
+
+		outputImageDatas.output = res.output;
+		outputImageDatas.edge = res.edge;
+		outputImageDatas.edgeness = res.edgeness;
+		outputImageDatas.palette = res.palette;
+	}
+	finally {
+		console.timeEnd("total");
+	}
+}
 
 const handleUpload = (readerResult: string) => {
 	const img = new Image();
@@ -105,10 +130,8 @@ const handleHeightChange = (event: Event) => {
 	if (event.target && event.target instanceof HTMLInputElement) {
 		outputSize.height = Number(event.target.value);
 
-		if (preserveRatio.value) {
-			const [height, width] = [inputImageData.value.height, inputImageData.value.width];
-			outputSize.width = Math.ceil(outputSize.height * width / height);
-		}
+		const [height, width] = [inputImageData.value.height, inputImageData.value.width];
+		outputSize.width = Math.ceil(outputSize.height * width / height);
 	}
 }
 
@@ -117,10 +140,8 @@ const handleWidthChange = (event: Event) => {
 	if (event.target && event.target instanceof HTMLInputElement) {
 		outputSize.width = Number(event.target.value);
 
-		if (preserveRatio.value) {
-			const [height, width] = [inputImageData.value.height, inputImageData.value.width];
-			outputSize.height = Math.ceil(outputSize.width * height / width);
-		}
+		const [height, width] = [inputImageData.value.height, inputImageData.value.width];
+		outputSize.height = Math.ceil(outputSize.width * height / width);
 	}
 }
 
@@ -167,6 +188,7 @@ const handleSensitiviyChange = (event: Event) => {
 			<div class="pixelation-container">
 				<ArrowIcon></ArrowIcon>
 				<button @click="handleTransform">픽셀화</button>
+				<button @click="handleTest">테스트</button>
 			</div>
 
 			<Tab>
@@ -244,10 +266,6 @@ const handleSensitiviyChange = (event: Event) => {
 						<label for="dithering">디더링</label>
 						<input type="checkbox" id="dithering" v-model="doDithering">
 					</div>
-					<div>
-						<label for="preserve-ratio">비율 유지</label>
-						<input type="checkbox" id="preserve-ratio" v-model="preserveRatio">
-					</div>
 				</div>
 			</div>
 
@@ -300,8 +318,8 @@ const handleSensitiviyChange = (event: Event) => {
 }
 
 .before-container {
-	width: 500px;
-	height: 500px;
+	width: 350px;
+	height: 350px;
 }
 
 .after-container {
@@ -309,8 +327,8 @@ const handleSensitiviyChange = (event: Event) => {
 	align-items: center;
 	justify-content: center;
 
-	width: 500px;
-	height: 500px;
+	width: 350px;
+	height: 350px;
 	padding: 10px;
 	margin: 0;
 	border: 2px dashed lightgray;

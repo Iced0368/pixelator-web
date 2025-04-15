@@ -56,6 +56,19 @@ class TransformModule {
         height: number, width: number, 
         palette: number, palette_size: number,
     ) => void
+
+    @EnsureModuleInitialized 
+    static _superPixel: (
+        srcPtr: number, dstPtr: number, 
+        height: number, width: number,
+        newHeight: number, newWidth: number, 
+    ) => void;
+
+    @EnsureModuleInitialized 
+    static _removeBorder: (
+        srcPtr: number, dstPtr: number, 
+        height: number, width: number,
+    ) => void;
 };
 
 Module().then((module: any) => {
@@ -151,5 +164,31 @@ export function dithering(
         src.ptr, dst.ptr,
         height, width, 
         palette.ptr, palette_size
+    );
+}
+
+export function superPixel
+(
+    src: CArray, dst:CArray,
+    height: number, width: number,
+    newHeight: number, newWidth: number, 
+) 
+{
+    TransformModule._superPixel(
+        src.ptr, dst.ptr,
+        height, width,
+        newHeight, newWidth, 
+    );
+}
+
+export function removeBorder
+(
+    src: CArray, dst:CArray,
+    height: number, width: number,
+) 
+{
+    TransformModule._removeBorder(
+        src.ptr, dst.ptr,
+        height, width,
     );
 }
